@@ -141,13 +141,13 @@
                 return;
             }
 
-            const formData = new FormData();
-            formData.append('file', audioBlob, 'recording.webm'); // Add audio blob
-
             try {
                 const response = await fetch('https://us-central1-spring-archive-445317-n4.cloudfunctions.net/whisper-transcribe/whisper-transcribe', {
                     method: 'POST',
-                    body: formData,
+                    headers: {
+                        'Content-Type': 'audio/webm', // Set the MIME type explicitly
+                    },
+                    body: audioBlob,
                 });
 
                 if (!response.ok) {
