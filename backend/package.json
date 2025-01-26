@@ -1,0 +1,10 @@
+{
+  "name": "gcf-part-lookup",
+  "version": "1.0.0",
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.2.0"
+  },
+  "scripts": {
+    "start": "functions-framework --target=partNumberLookup"
+  }
+}
