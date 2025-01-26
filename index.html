@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -42,10 +41,10 @@
 
         #partNumbersTable td {
             padding: 8px;
+            border-bottom: 1px solid #ccc;
         }
     </style>
 </head>
-
 <body>
     <h1>Part Number Collector</h1>
     <p>Type the parts you need in the box below, or click "Record" to speak them aloud.</p>
@@ -62,8 +61,9 @@
         <table id="partNumbersTable" style="width: 100%; border-collapse: collapse; text-align: left;">
             <thead>
                 <tr>
-                    <th style="border-bottom: 2px solid #ccc; padding: 8px;">Description</th>
-                    <th style="border-bottom: 2px solid #ccc; padding: 8px;">Border States Part Number</th>
+                    <th>Description</th>
+                    <th>Border States Part Number</th>
+                    <th>Graybar Part Number</th>
                 </tr>
             </thead>
             <tbody>
@@ -72,100 +72,13 @@
         </table>
     </div>
 
-
     <script>
-        // -----------------------------------------------------------
-        // Configuration (Replace with your actual endpoints and keys)
-        // -----------------------------------------------------------
         const GCF_ENDPOINT = 'https://us-central1-spring-archive-445317-n4.cloudfunctions.net/get-part-numbers';
 
-        // -----------------------------------------------------------
-        // Recording audio from microphone
-        // -----------------------------------------------------------
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-
-        const recordBtn = document.getElementById('recordBtn');
         const submitBtn = document.getElementById('submitBtn');
         const partsInput = document.getElementById('partsInput');
         const statusMessage = document.getElementById('statusMessage');
 
-        recordBtn.addEventListener('click', async () => {
-            if (!isRecording) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-
-                    audioChunks = [];
-                    mediaRecorder.ondataavailable = event => {
-                        audioChunks.push(event.data);
-                    };
-                    mediaRecorder.onstop = async () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        console.log('Blob size:', audioBlob.size, 'Blob type:', audioBlob.type);
-
-                        if (audioBlob.size === 0) {
-                            console.error('Audio blob is empty.');
-                            statusMessage.textContent = 'Recording failed. Please try again.';
-                            return;
-                        }
-
-                        await transcribeAudio(audioBlob);
-                    };
-
-                    mediaRecorder.start();
-                    isRecording = true;
-                    recordBtn.textContent = 'Stop';
-                    statusMessage.textContent = 'Recording... speak now.';
-                } catch (err) {
-                    console.error('Error accessing microphone', err);
-                    statusMessage.textContent = 'Microphone access denied or not supported.';
-                }
-            } else {
-                mediaRecorder.stop();
-                isRecording = false;
-                recordBtn.textContent = 'Record';
-                statusMessage.textContent = 'Processing transcription...';
-            }
-        });
-
-
-        // -----------------------------------------------------------
-        // Transcribe audio using Google Cloud Function (GCF)
-        // -----------------------------------------------------------
-        async function transcribeAudio(audioBlob) {
-            if (audioBlob.size === 0) {
-                console.error('Audio blob is empty.');
-                statusMessage.textContent = 'Recording failed. Please try again.';
-                return;
-            }
-
-            try {
-                const response = await fetch('https://us-central1-spring-archive-445317-n4.cloudfunctions.net/whisper-transcribe/whisper-transcribe', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'audio/webm', // Set the MIME type explicitly
-                    },
-                    body: audioBlob,
-                });
-
-                if (!response.ok) {
-                    throw new Error('Transcription request failed: ' + response.statusText);
-                }
-
-                const result = await response.json();
-                const transcribedText = result.text || '';
-                partsInput.value = (partsInput.value.trim() + '\n' + transcribedText).trim();
-                statusMessage.textContent = 'Transcription complete.';
-            } catch (error) {
-                console.error('Error during transcription:', error);
-                statusMessage.textContent = 'Error transcribing audio. Please try again.';
-            }
-        }
-
-
-        // Submit parts list to Google Cloud Function
         submitBtn.addEventListener('click', async () => {
             const partsText = partsInput.value.trim();
             if (!partsText) {
@@ -188,7 +101,7 @@
                 }
 
                 const result = await response.json();
-                const partNumbers = result.partNumbers;
+                const vendorData = result.vendors || []; // Array of vendor objects
 
                 // Get table elements
                 const tableContainer = document.getElementById('partNumbersTableContainer');
@@ -197,57 +110,56 @@
                 // Clear the table before adding new rows
                 tableBody.innerHTML = '';
 
-                // Add rows to the table
-                if (partNumbers.length > 0) {
-                    partsArray.forEach((description, index) => {
-                        const partNumber = partNumbers[index] || 'N/A'; // Handle missing part numbers
+                partsArray.forEach((description, index) => {
+                    const row = document.createElement('tr');
 
-                        const row = document.createElement('tr');
+                    // Description cell
+                    const descriptionCell = document.createElement('td');
+                    descriptionCell.textContent = description;
+                    row.appendChild(descriptionCell);
 
-                        // Description cell
-                        const descriptionCell = document.createElement('td');
-                        descriptionCell.textContent = description;
-                        descriptionCell.style.padding = '8px';
-                        descriptionCell.style.borderBottom = '1px solid #ccc';
+                    // Border States Part Number cell
+                    const borderStatesCell = document.createElement('td');
+                    const borderStates = vendorData.find(v => v.vendor === 'borderStates');
+                    const borderStatesPart = borderStates?.partNumbers[index] || '-';
+                    if (borderStatesPart !== '-') {
+                        const link = document.createElement('a');
+                        link.href = `https://www.borderstates.com/p/${borderStatesPart}`;
+                        link.textContent = borderStatesPart;
+                        link.target = '_blank';
+                        borderStatesCell.appendChild(link);
+                    } else {
+                        borderStatesCell.textContent = borderStatesPart;
+                    }
+                    row.appendChild(borderStatesCell);
 
-                        // Part number cell
-                        const partNumberCell = document.createElement('td');
-                        partNumberCell.style.padding = '8px';
-                        partNumberCell.style.borderBottom = '1px solid #ccc';
+                    // Graybar Part Number cell
+                    const graybarCell = document.createElement('td');
+                    const graybar = vendorData.find(v => v.vendor === 'graybar');
+                    const graybarPart = graybar?.partNumbers[index] || '-';
+                    if (graybarPart !== '-') {
+                        const link = document.createElement('a');
+                        link.href = `https://www.graybar.com/p/${graybarPart}`;
+                        link.textContent = graybarPart;
+                        link.target = '_blank';
+                        graybarCell.appendChild(link);
+                    } else {
+                        graybarCell.textContent = graybarPart;
+                    }
+                    row.appendChild(graybarCell);
 
-                        if (partNumber !== 'N/A') {
-                            const link = document.createElement('a');
-                            link.href = `https://www.borderstates.com/p/${partNumber}`;
-                            link.textContent = partNumber;
-                            link.target = '_blank'; // Open in new tab
-                            partNumberCell.appendChild(link);
-                        } else {
-                            partNumberCell.textContent = partNumber;
-                        }
+                    // Add row to the table body
+                    tableBody.appendChild(row);
+                });
 
-                        // Add cells to the row
-                        row.appendChild(descriptionCell);
-                        row.appendChild(partNumberCell);
-
-                        // Add row to the table body
-                        tableBody.appendChild(row);
-                    });
-
-                    // Show the table
-                    tableContainer.style.display = 'block';
-                    statusMessage.textContent = 'Part numbers listed successfully.';
-                } else {
-                    statusMessage.textContent = 'No part numbers returned.';
-                    tableContainer.style.display = 'none';
-                }
+                // Show the table
+                tableContainer.style.display = 'block';
+                statusMessage.textContent = 'Part numbers listed successfully.';
             } catch (error) {
                 console.error('Submission error:', error);
                 statusMessage.textContent = 'Error submitting parts to the server.';
             }
         });
-
-
     </script>
 </body>
-
 </html>
