@@ -1,116 +1,168 @@
 const { http } = require('@google-cloud/functions-framework');
+// Import dependencies if not already included
+const { PineconeClient } = require('@pinecone-database/pinecone'); // Assume Pinecone Client library
+// const fetch = require('node-fetch'); // Uncomment for Node.js <18
 
-// If on Node.js <18, uncomment the following:
-// const fetch = require('node-fetch'); 
-
-// Your function name in GCF must match the export below
 http('partNumberLookup', async (req, res) => {
   // --- 1. Handle CORS ---
-  res.set('Access-Control-Allow-Origin', '*'); // Allow all origins
+  res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-  // Preflight check
   if (req.method === 'OPTIONS') {
-    // No content needed for preflight
     res.status(204).send('');
     return;
   }
 
   // --- 2. Parse Input ---
-  // Expecting JSON body: { "descriptions": ["12 AWG THHN Copper Wire", "1/2 Inch PVC Conduit", ...] }
   const { descriptions = [] } = req.body || {};
   if (!Array.isArray(descriptions) || descriptions.length === 0) {
     return res.status(400).json({ error: "No descriptions provided." });
   }
 
-  // Join descriptions with newlines so we can pass them as a single user message
-  const joinedDescriptions = descriptions.join('\n');
+  // --- 3. Initialize Vendors ---
+  const vendors = [];
 
-  // --- 3. Build OpenAI payload for function calling ---
-  // 3a. Read from environment (or hardcode for demo)
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  const fineTunedModel = process.env.FT_MODEL_NAME || 'gpt-3.5-turbo-0613';
+  // --- 4. Border States (Stub) ---
+  const borderStates = await handleBorderStates(descriptions);
+  if (borderStates) {
+    vendors.push(borderStates);
+  }
 
-  // 3b. Define the function schema for returning multiple part numbers
-  const functions = [
-    {
-      name: "lookupParts",
-      description: "Returns an array of part numbers for multiple item descriptions",
-      parameters: {
-        type: "object",
-        properties: {
-          partNumbers: {
-            type: "array",
-            items: {
-              type: "string",
-              description: "A single part number"
-            }
-          }
-        },
-        required: ["partNumbers"]
-      }
-    }
-  ];
+  // --- 5. Graybar ---
+  const graybar = await handleGraybar(descriptions);
+  if (graybar) {
+    vendors.push(graybar);
+  }
 
-  // 3c. Create the ChatCompletion request body
-  const payload = {
-    model: fineTunedModel,
-    messages: [
-      {
-        role: "system",
-        content: "You are an AI that returns the correct part numbers for multiple item descriptions, each on its own line. " +
-          "Respond by calling the function with an array of part numbers. No additional text."
-      },
-      {
-        role: "user",
-        content: joinedDescriptions
-      }
-    ],
-    functions: functions,
-    temperature: 0 // for deterministic output
-    // Optional: max_tokens: 100
-  };
+  // --- 6. Return Consolidated Response ---
+  return res.status(200).json({ vendors });
+});
 
-  // --- 4. Call OpenAI API ---
+async function handleBorderStates(descriptions) {
+  // Placeholder function for Border States
+  // Add functionality here as needed for Border States
+  return null; // Returning null for now, meaning no data for this vendor
+}
+
+async function handleGraybar(descriptions) {
   try {
-    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify(payload)
+    // Initialize Pinecone client
+    const pinecone = new PineconeClient();
+    await pinecone.init({
+      apiKey: process.env.PINECONE_API_KEY,
+      environment: process.env.PINECONE_ENVIRONMENT,
     });
 
-    if (!apiResponse.ok) {
-      const errText = await apiResponse.text();
-      console.error("OpenAI API error:", errText);
-      return res.status(apiResponse.status).json({ error: errText });
-    }
+    const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
-    const json = await apiResponse.json();
+    // Query Pinecone for top 10 matches for each description
+    const pineconeResults = await Promise.all(
+      descriptions.map(async (description) => {
+        const queryResponse = await index.query({
+          queryRequest: {
+            vector: await getEmbedding(description), // Get vector representation of description
+            topK: 10,
+            includeMetadata: true,
+          },
+        });
 
-    // --- 5. Parse Function Call Output ---
-    if (
-      json.choices &&
-      json.choices.length > 0 &&
-      json.choices[0].message &&
-      json.choices[0].message.function_call
-    ) {
-      const funcCall = json.choices[0].message.function_call;
-      const args = JSON.parse(funcCall.arguments);
-      // Expecting: { "partNumbers": ["12345","67890",...] }
-      const partNumbers = args.partNumbers || [];
+        // Extract top 10 matches with metadata
+        return {
+          description,
+          matches: queryResponse.matches.map((match) => ({
+            partNumber: match.metadata?.part_number || 'N/A',
+            score: match.score || 0,
+            metadata: match.metadata,
+          })),
+        };
+      })
+    );
 
-      // Return the partNumbers array to the caller
-      return res.status(200).json({ partNumbers });
-    } else {
-      // No function call or no function_call.arguments
-      return res.status(200).json({ partNumbers: [] });
-    }
+    // Use ChatGPT to determine the best match for each description
+    const chatGPTResults = await Promise.all(
+      pineconeResults.map(async ({ description, matches }) => {
+        const prompt = generateGraybarPrompt(description, matches);
+        const bestMatch = await getChatGPTResponse(prompt);
+        return {
+          description,
+          bestMatch,
+        };
+      })
+    );
+
+    // Format the result for the vendor
+    return {
+      vendor: "graybar",
+      partNumbers: chatGPTResults.map(({ bestMatch }) => bestMatch?.partNumber || "N/A"),
+    };
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: error.message });
+    console.error("Error handling Graybar:", error);
+    return null; // Return null to avoid breaking the response
   }
-});
+}
+
+// Helper function: Generate prompt for ChatGPT
+function generateGraybarPrompt(description, matches) {
+  const matchDetails = matches
+    .map(
+      (match, index) =>
+        `Match ${index + 1}: Part Number: ${match.partNumber}, Score: ${match.score.toFixed(2)}`
+    )
+    .join('\n');
+
+  return `The following are the top 10 matches for the description "${description}":\n${matchDetails}\n\nWhich part number best matches the description, and why?`;
+}
+
+// Helper function: Get vector embedding for a description
+async function getEmbedding(description) {
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      input: description,
+      model: "text-embedding-ada-002", // Replace with your embedding model
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Embedding generation failed: ${response.statusText}`);
+  }
+
+  const json = await response.json();
+  return json.data[0].embedding; // Return the embedding vector
+}
+
+// Helper function: Query ChatGPT
+async function getChatGPTResponse(prompt) {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ChatGPT request failed: ${response.statusText}`);
+  }
+
+  const json = await response.json();
+  const responseText = json.choices[0]?.message?.content || "";
+  const partNumber = extractBestPartNumber(responseText); // Extract part number from response
+  return { partNumber, explanation: responseText };
+}
+
+// Helper function: Extract the best part number from ChatGPT response
+function extractBestPartNumber(responseText) {
+  const match = responseText.match(/Part Number:\s*(\S+)/i);
+  return match ? match[1] : null;
+}
