@@ -1,7 +1,0 @@
-.DS_Store
-/backend/node_modules/
-
-# Ignore other typical files for the backend
-/backend/package-lock.json
-/backend/.env
-/backend/.DS_Store
