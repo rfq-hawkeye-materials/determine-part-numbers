@@ -2,9 +2,13 @@
   "name": "gcf-part-lookup",
   "version": "1.0.0",
   "dependencies": {
-    "@google-cloud/functions-framework": "^3.2.0"
+    "@google-cloud/functions-framework": "^3.2.0",
+    "@pinecone-database/pinecone": "^0.0.8"
   },
   "scripts": {
     "start": "functions-framework --target=partNumberLookup"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

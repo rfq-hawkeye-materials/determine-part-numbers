@@ -4,6 +4,8 @@ const { PineconeClient } = require('@pinecone-database/pinecone'); // Assume Pin
 // const fetch = require('node-fetch'); // Uncomment for Node.js <18
 
 http('partNumberLookup', async (req, res) => {
+
+  res.status(200).send('Hello, World!');
   // --- 1. Handle CORS ---
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
