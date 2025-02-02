@@ -1,6 +1,8 @@
 # Node.js dependencies
 node_modules/
+/backend/node_modules/
 package-lock.json
+launch.json
 
 # Logs
 *.log
