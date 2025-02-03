@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -43,8 +44,54 @@
             padding: 8px;
             border-bottom: 1px solid #ccc;
         }
+
+        /* Tooltip Icon and Tooltip Styles */
+        .info-icon {
+            display: inline-block;
+            margin-left: 6px;
+            position: relative;
+            border: 1px solid #333;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            text-align: center;
+            line-height: 16px;
+            font-size: 14px;
+            font-family: sans-serif;
+            cursor: pointer;
+            background-color: #eee;
+        }
+
+        .info-icon:hover .reason-tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+
+        .reason-tooltip {
+            visibility: hidden;
+            opacity: 0;
+            background-color: #333;
+            color: #fff;
+            border-radius: 4px;
+            padding: 6px 8px;
+            position: absolute;
+            z-index: 999;
+            top: 25px;
+            /* Position below the icon */
+            left: 0;
+            /* Align left under the icon */
+            transition: opacity 0.2s, visibility 0.2s;
+            white-space: nowrap;
+            /* You can also set a max-width if your reasons are long:
+         max-width: 200px;
+         white-space: normal;
+      */
+        }
+        
     </style>
 </head>
+
 <body>
     <h1>Part Number Collector</h1>
     <p>Type the parts you need in the box below, or click "Record" to speak them aloud.</p>
@@ -121,12 +168,19 @@
                     // Border States Part Number cell
                     const borderStatesCell = document.createElement('td');
                     const borderStates = vendorData.find(v => v.vendor === 'borderStates');
-                    const borderStatesPart = borderStates?.partNumbers[index] || '-';
+                    // Get the object that contains both partNumber and reason
+                    const borderStatesData = borderStates?.partNumbers[index];
+                    const borderStatesPart = borderStatesData ? borderStatesData.vendorPartNumber : '-';
+                    const borderStatesReason = borderStatesData ? borderStatesData.explanation : '';
                     if (borderStatesPart !== '-') {
                         const link = document.createElement('a');
                         link.href = `https://www.borderstates.com/p/${borderStatesPart}`;
                         link.textContent = borderStatesPart;
                         link.target = '_blank';
+                        // Add a tooltip that shows the "reason" property
+                        if (borderStatesReason) {
+                            link.title = borderStatesReason;
+                        }
                         borderStatesCell.appendChild(link);
                     } else {
                         borderStatesCell.textContent = borderStatesPart;
@@ -136,19 +190,25 @@
                     // Graybar Part Number cell
                     const graybarCell = document.createElement('td');
                     const graybar = vendorData.find(v => v.vendor === 'graybar');
-                    const graybarPart = graybar?.partNumbers[index] || '-';
+                    const graybarData = graybar?.partNumbers[index];
+                    const graybarPart = graybarData ? graybarData.vendorPartNumber : '-';
+                    const graybarReason = graybarData ? graybarData.explanation : '';
                     if (graybarPart !== '-') {
                         const link = document.createElement('a');
                         link.href = `https://www.graybar.com/p/${graybarPart}`;
                         link.textContent = graybarPart;
                         link.target = '_blank';
+                        // Add a tooltip to display the "reason" property
+                        if (graybarReason) {
+                            link.title = graybarReason;
+                        }
                         graybarCell.appendChild(link);
                     } else {
                         graybarCell.textContent = graybarPart;
                     }
                     row.appendChild(graybarCell);
 
-                    // Add row to the table body
+                    // Append the row to the table body
                     tableBody.appendChild(row);
                 });
 
@@ -162,4 +222,5 @@
         });
     </script>
 </body>
+
 </html>

@@ -3,9 +3,8 @@ const { http } = require("@google-cloud/functions-framework");
 const { Pinecone } = require('@pinecone-database/pinecone');
 const cheerio = require('cheerio');
 
-http('partNumberLookup', async (req, res) => {
+http('getPartNumbers', async (req, res) => {
     // --- 1. Handle CORS ---
-    console.log("Start2");
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
     res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -28,11 +27,10 @@ http('partNumberLookup', async (req, res) => {
     const borderStates = await handleBorderStates(descriptions);
     if (borderStates) vendors.push(borderStates);
 
-
     // --- 5. Graybar ---
     const graybar = await handleGraybar(descriptions);
     if (graybar) vendors.push(graybar);
-    
+
 
     // --- 6. Return Consolidated Response ---
     return res.status(200).json({ vendors });
@@ -79,7 +77,7 @@ async function handleGraybar(descriptions) {
                 let realtimeResults = [];
                 try {
                     realtimeResults = await getRealtimeGraybarResults(description);
-                    console.log("Realtime results:", realtimeResults);
+                    // console.log("Realtime results:", realtimeResults);
                 } catch (err) {
                     console.error("Realtime search failed for description:", description, err);
                     realtimeResults = [];
@@ -125,7 +123,12 @@ async function handleGraybar(descriptions) {
         // Format the result for the vendor
         return {
             vendor: "graybar",
-            partNumbers: chatGPTResults.map(({ bestMatch }) => bestMatch?.vendorPartNumber || "N/A"),
+            partNumbers: chatGPTResults.map(({ bestMatch }) => {
+                return {
+                    vendorPartNumber: bestMatch?.vendorPartNumber || "N/A",
+                    explanation: bestMatch?.explanation || "N/A",
+                }
+            }),
         };
     } catch (error) {
         console.error("Error handling Graybar:", error);
@@ -233,7 +236,7 @@ async function getChatGPTResponse(prompt) {
             "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         },
         body: JSON.stringify({
-            model: "gpt-4", // or use gpt-3.5-turbo if preferred
+            model: "gpt-4-turbo", // or use gpt-3.5-turbo if preferred
             messages: [{ role: "user", content: prompt }],
             functions: [
                 {

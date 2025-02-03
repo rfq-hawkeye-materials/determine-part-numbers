@@ -1,6 +1,6 @@
 // Define the sample input
 const sampleInput = {
-    descriptions: ["Schedule 80 PVC Conduit 1.5 inch"]
+    descriptions: ["electrical tape", "Schedule 80 PVC Conduit 1.5 inch"]
 };
 
 // Send a POST request to your local function
