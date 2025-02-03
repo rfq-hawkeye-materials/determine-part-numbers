@@ -40,7 +40,7 @@ http('getPartNumbers', async (req, res) => {
 async function handleBorderStates(descriptions) {
     // Placeholder function for Border States
     // Add functionality here as needed for Border States
-    return null; // Returning null for now, meaning no data for this vendor
+    return { vendor: 'borderStates', vendorDisplayName: 'Border States', partNumbers: [] }; // Returning null for now, meaning no data for this vendor
 }
 
 async function handleGraybar(descriptions) {
@@ -123,6 +123,7 @@ async function handleGraybar(descriptions) {
         // Format the result for the vendor
         return {
             vendor: "graybar",
+            vendorDisplayName: "Graybar",
             partNumbers: chatGPTResults.map(({ bestMatch }) => {
                 return {
                     vendorPartNumber: bestMatch?.vendorPartNumber || "N/A",

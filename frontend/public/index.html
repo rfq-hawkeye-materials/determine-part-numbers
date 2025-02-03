@@ -62,6 +62,7 @@
             background-color: #eee;
         }
 
+
         .info-icon:hover .reason-tooltip {
             visibility: visible;
             opacity: 1;
@@ -73,22 +74,31 @@
             opacity: 0;
             background-color: #333;
             color: #fff;
-            border-radius: 4px;
-            padding: 6px 8px;
+            border-radius: 6px;
+            padding: 8px 12px;
             position: absolute;
             z-index: 999;
             top: 25px;
             /* Position below the icon */
             left: 0;
-            /* Align left under the icon */
             transition: opacity 0.2s, visibility 0.2s;
-            white-space: nowrap;
-            /* You can also set a max-width if your reasons are long:
-         max-width: 200px;
-         white-space: normal;
-      */
+            display: block;
+            /* Ensures proper width behavior */
+            max-width: 600px;
+            /* Adjust width to suit your needs */
+            min-width: 300px;
+            /* Prevents it from being too narrow */
+            white-space: normal;
+            /* Ensures text wraps properly */
+            word-wrap: break-word;
+            /* Prevents long words from breaking layout */
+            text-align: left;
+            /* Aligns text properly instead of center */
+            font-size: 14px;
+            /* Ensures readable font */
+            line-height: 1.4;
+            /* Adjusts spacing to look natural */
         }
-        
     </style>
 </head>
 
@@ -107,11 +117,7 @@
         <h3>Part Numbers:</h3>
         <table id="partNumbersTable" style="width: 100%; border-collapse: collapse; text-align: left;">
             <thead>
-                <tr>
-                    <th>Description</th>
-                    <th>Border States Part Number</th>
-                    <th>Graybar Part Number</th>
-                </tr>
+                <!-- Rows will be added dynamically -->
             </thead>
             <tbody>
                 <!-- Rows will be added dynamically -->
@@ -148,69 +154,17 @@
                 }
 
                 const result = await response.json();
-                const vendorData = result.vendors || []; // Array of vendor objects
+                const vendors = result.vendors || [];
+
+                // Build the table header
+                buildTableHeader(vendors);
+
+                // Build table body
+                buildTableBody(partsArray, vendors);
 
                 // Get table elements
                 const tableContainer = document.getElementById('partNumbersTableContainer');
                 const tableBody = document.getElementById('partNumbersTable').querySelector('tbody');
-
-                // Clear the table before adding new rows
-                tableBody.innerHTML = '';
-
-                partsArray.forEach((description, index) => {
-                    const row = document.createElement('tr');
-
-                    // Description cell
-                    const descriptionCell = document.createElement('td');
-                    descriptionCell.textContent = description;
-                    row.appendChild(descriptionCell);
-
-                    // Border States Part Number cell
-                    const borderStatesCell = document.createElement('td');
-                    const borderStates = vendorData.find(v => v.vendor === 'borderStates');
-                    // Get the object that contains both partNumber and reason
-                    const borderStatesData = borderStates?.partNumbers[index];
-                    const borderStatesPart = borderStatesData ? borderStatesData.vendorPartNumber : '-';
-                    const borderStatesReason = borderStatesData ? borderStatesData.explanation : '';
-                    if (borderStatesPart !== '-') {
-                        const link = document.createElement('a');
-                        link.href = `https://www.borderstates.com/p/${borderStatesPart}`;
-                        link.textContent = borderStatesPart;
-                        link.target = '_blank';
-                        // Add a tooltip that shows the "reason" property
-                        if (borderStatesReason) {
-                            link.title = borderStatesReason;
-                        }
-                        borderStatesCell.appendChild(link);
-                    } else {
-                        borderStatesCell.textContent = borderStatesPart;
-                    }
-                    row.appendChild(borderStatesCell);
-
-                    // Graybar Part Number cell
-                    const graybarCell = document.createElement('td');
-                    const graybar = vendorData.find(v => v.vendor === 'graybar');
-                    const graybarData = graybar?.partNumbers[index];
-                    const graybarPart = graybarData ? graybarData.vendorPartNumber : '-';
-                    const graybarReason = graybarData ? graybarData.explanation : '';
-                    if (graybarPart !== '-') {
-                        const link = document.createElement('a');
-                        link.href = `https://www.graybar.com/p/${graybarPart}`;
-                        link.textContent = graybarPart;
-                        link.target = '_blank';
-                        // Add a tooltip to display the "reason" property
-                        if (graybarReason) {
-                            link.title = graybarReason;
-                        }
-                        graybarCell.appendChild(link);
-                    } else {
-                        graybarCell.textContent = graybarPart;
-                    }
-                    row.appendChild(graybarCell);
-
-                    // Append the row to the table body
-                    tableBody.appendChild(row);
-                });
 
                 // Show the table
                 tableContainer.style.display = 'block';
@@ -220,6 +174,112 @@
                 statusMessage.textContent = 'Error submitting parts to the server.';
             }
         });
+
+        /**
+    * Dynamically build the table header:
+    * A "Description" column + one column per vendor.
+    */
+        function buildTableHeader(vendors) {
+            const thead = document.querySelector('#partNumbersTable thead');
+            thead.innerHTML = ''; // Clear out any existing header
+
+            const headerRow = document.createElement('tr');
+
+            // First column: "Description"
+            const descHeader = document.createElement('th');
+            descHeader.textContent = 'Description';
+            headerRow.appendChild(descHeader);
+
+            // Then one column for each vendor
+            vendors.forEach((vendor) => {
+                const vendorHeader = document.createElement('th');
+                // You can label columns however you like
+                // vendor.vendor might be 'borderStates'; consider capitalizing
+                // or using some display name returned from the server
+                vendorHeader.textContent = vendor.vendorDisplayName || capitalizeFirstLetter(vendor.vendor);
+                headerRow.appendChild(vendorHeader);
+            });
+
+            thead.appendChild(headerRow);
+        }
+
+        /**
+         * Dynamically build the table body, one row per description,
+         * plus one cell per vendor in that row.
+         */
+        function buildTableBody(partsArray, vendors) {
+            const tbody = document.querySelector('#partNumbersTable tbody');
+            tbody.innerHTML = ''; // Clear out existing rows
+
+            partsArray.forEach((description, rowIndex) => {
+                const row = document.createElement('tr');
+
+                // == Description Cell ==
+                const descriptionCell = document.createElement('td');
+                descriptionCell.textContent = description;
+                row.appendChild(descriptionCell);
+
+                // == One cell per vendor ==
+                vendors.forEach((vendor) => {
+                    const cell = document.createElement('td');
+                    const vendorPartObj = vendor.partNumbers && vendor.partNumbers[rowIndex];
+                    if (!vendorPartObj || !vendorPartObj.vendorPartNumber || vendorPartObj.vendorPartNumber === '-') {
+                        // If no part number, show '-'
+                        cell.textContent = '-';
+                    } else {
+                        // Build the link
+                        const link = document.createElement('a');
+                        // If you have logic for each vendor’s link prefix,
+                        // you can store it in an object or return it from the backend.
+                        const linkPrefix = getLinkPrefix(vendor.vendor); // see helper function below
+                        link.href = linkPrefix + vendorPartObj.vendorPartNumber;
+                        link.target = '_blank';
+                        link.textContent = vendorPartObj.vendorPartNumber;
+                        cell.appendChild(link);
+
+                        // If there's a reason, add the info icon + tooltip
+                        if (vendorPartObj.explanation) {
+                            const infoIcon = document.createElement('span');
+                            infoIcon.className = 'info-icon';
+                            infoIcon.textContent = 'i';
+
+                            const reasonTooltip = document.createElement('span');
+                            reasonTooltip.className = 'reason-tooltip';
+                            reasonTooltip.textContent = vendorPartObj.explanation;
+
+                            // Nest the tooltip inside the icon so it shows on hover
+                            infoIcon.appendChild(reasonTooltip);
+
+                            // Add the icon next to the link
+                            cell.appendChild(infoIcon);
+                        }
+                    }
+                    row.appendChild(cell);
+                });
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // Helper to return the link prefix based on vendor name
+        // You could also store this in your backend or in a config object
+        function getLinkPrefix(vendorName) {
+            switch (vendorName) {
+                case 'borderStates':
+                    return 'https://www.borderstates.com/p/';
+                case 'graybar':
+                    return 'https://www.graybar.com/p/';
+                // Add more vendors
+                default:
+                    // Fallback or empty string
+                    return 'https://example.com/search?q=';
+            }
+        }
+
+        // Quick utility to capitalize vendor name if needed
+        function capitalizeFirstLetter(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
     </script>
 </body>
 
