@@ -9,7 +9,7 @@
     "cheerio": "^1.0.0-rc.12"
   },
   "scripts": {
-    "start": "functions-framework --target=partNumberLookup"
+    "start": "functions-framework --target=getPartNumbers"
   },
   "engines": {
     "node": ">=20"
