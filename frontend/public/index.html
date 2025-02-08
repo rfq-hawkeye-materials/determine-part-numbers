@@ -130,13 +130,15 @@
     <button id="submitBtn">Submit</button>
 
     <div class="status" id="statusMessage"></div>
+    <!-- Progress bar container, hidden by default -->
     <div id="progressContainer"
-        style="width: 100%; background: #eee; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px;">
+        style="display: none; width: 100%; background: #eee; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px;">
         <div id="progressBar"
             style="width: 0%; background: #4caf50; height: 20px; border-radius: 4px; text-align: center; color: white; line-height: 20px;">
             0%
         </div>
     </div>
+
 
 
     <!-- Table for displaying results -->
@@ -154,7 +156,7 @@
 
     <script>
         const GCF_ENDPOINT = 'https://us-central1-spring-archive-445317-n4.cloudfunctions.net/get-part-numbers';
-      
+
         const submitBtn = document.getElementById('submitBtn');
         const partsInput = document.getElementById('partsInput');
         const statusMessage = document.getElementById('statusMessage');
@@ -163,194 +165,195 @@
         const table = document.getElementById('partNumbersTable');
         const tableHead = table.querySelector('thead');
         const tableBody = table.querySelector('tbody');
-      
+
         let isComplete = false;       // True once we've received the "complete" message.
         let hasReceivedData = false;  // True once we've received any data messages.
         let eventSource;
-      
+
         submitBtn.addEventListener('click', async () => {
-          const partsText = partsInput.value.trim();
-          if (!partsText) {
-            statusMessage.textContent = 'Please enter some part descriptions first.';
-            return;
-          }
-      
-          const descriptions = partsText.split(/\n+/); // Split by line breaks
-      
-          // Clear previous results.
-          tableHead.innerHTML = '';
-          tableBody.innerHTML = '';
-          tableContainer.style.display = 'block';
-          statusMessage.style.display = 'block';
-          statusMessage.textContent = `Submitting ${descriptions.length} part(s)...`;
-          updateProgressBar(0);
-      
-          isComplete = false;
-          hasReceivedData = false; // Reset for a new submission
-      
-          try {
-            const url = `${GCF_ENDPOINT}?descriptions=${encodeURIComponent(JSON.stringify(descriptions))}`;
-            eventSource = new EventSource(url);
-            console.log("Connecting to:", url);
-      
-            eventSource.onopen = () => {
-              console.log("Connection opened.");
-            };
-      
-            eventSource.onerror = (error) => {
-              // If we've already completed, do nothing (ignore).
-              if (isComplete) {
-                console.log("Ignoring error event after completion:", error);
+            progressContainer.style.display = 'block';
+            const partsText = partsInput.value.trim();
+            if (!partsText) {
+                statusMessage.textContent = 'Please enter some part descriptions first.';
                 return;
-              }
-              // If we haven't received any data yet, this is likely a genuine connection issue.
-              if (!hasReceivedData) {
-                console.error("EventSource connection failed before any data arrived:", error);
-                statusMessage.textContent = "Error: Connection lost.";
-              } else {
-                // We *have* received some data, so this error might just be the server closing or a final SSE glitch.
-                // Usually, we just log it or ignore it to avoid overwriting the UI.
-                console.warn("Late EventSource error after data was received:", error);
-              }
-              eventSource.close();
-            };
-      
-            eventSource.onmessage = (event) => {
-              let data = {};
-              try {
-                data = JSON.parse(event.data);
-              } catch (err) {
-                console.error("Error parsing SSE data:", err);
-                return;
-              }
-      
-              // Ignore heartbeat or empty updates
-              if (!data.description && !data.vendors && data.progress === undefined) {
-                return;
-              }
-      
-              // We received meaningful data, so track that fact.
-              hasReceivedData = true;
-      
-              // If the server sends back an error in the data itself
-              if (data.error) {
-                statusMessage.textContent = `Error: ${data.error}`;
-                eventSource.close();
-                return;
-              }
-      
-              // Handle progress updates
-              if (data.progress !== undefined && !isNaN(data.progress)) {
-                const progressRounded = Math.round(data.progress);
-                statusMessage.textContent = `Processing... ${progressRounded}% complete`;
-                updateProgressBar(progressRounded);
-              }
-      
-              // Append any vendor rows
-              if (data.description && data.vendors) {
-                appendRowToTable(data);
-              }
-      
-              // If complete, finalize
-              if (data.complete) {
-                isComplete = true;
-                statusMessage.textContent = "All parts processed!";
-                updateProgressBar(100);
-      
-                console.log("Final aggregated results:", data.results);
-      
-                // Optionally hide the status message after a short delay
-                setTimeout(() => {
-                  statusMessage.style.display = 'none';
-                }, 1000);
-      
-                // Override the error handler so no future errors rewrite the status
-                eventSource.onerror = () => {};
-                eventSource.close();
-              }
-            };
-          } catch (error) {
-            console.error('Submission error:', error);
-            statusMessage.textContent = 'Error submitting parts to the server.';
-          }
+            }
+
+            const descriptions = partsText.split(/\n+/); // Split by line breaks
+
+            // Clear previous results.
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            tableContainer.style.display = 'block';
+            statusMessage.style.display = 'block';
+            statusMessage.textContent = `Submitting ${descriptions.length} part(s)...`;
+            updateProgressBar(0);
+
+            isComplete = false;
+            hasReceivedData = false; // Reset for a new submission
+
+            try {
+                const url = `${GCF_ENDPOINT}?descriptions=${encodeURIComponent(JSON.stringify(descriptions))}`;
+                eventSource = new EventSource(url);
+                console.log("Connecting to:", url);
+
+                eventSource.onopen = () => {
+                    console.log("Connection opened.");
+                };
+
+                eventSource.onerror = (error) => {
+                    // If we've already completed, do nothing (ignore).
+                    if (isComplete) {
+                        console.log("Ignoring error event after completion:", error);
+                        return;
+                    }
+                    // If we haven't received any data yet, this is likely a genuine connection issue.
+                    if (!hasReceivedData) {
+                        console.error("EventSource connection failed before any data arrived:", error);
+                        statusMessage.textContent = "Error: Connection lost.";
+                    } else {
+                        // We *have* received some data, so this error might just be the server closing or a final SSE glitch.
+                        // Usually, we just log it or ignore it to avoid overwriting the UI.
+                        console.warn("Late EventSource error after data was received:", error);
+                    }
+                    eventSource.close();
+                };
+
+                eventSource.onmessage = (event) => {
+                    let data = {};
+                    try {
+                        data = JSON.parse(event.data);
+                    } catch (err) {
+                        console.error("Error parsing SSE data:", err);
+                        return;
+                    }
+
+                    // Ignore heartbeat or empty updates
+                    if (!data.description && !data.vendors && data.progress === undefined) {
+                        return;
+                    }
+
+                    // We received meaningful data, so track that fact.
+                    hasReceivedData = true;
+
+                    // If the server sends back an error in the data itself
+                    if (data.error) {
+                        statusMessage.textContent = `Error: ${data.error}`;
+                        eventSource.close();
+                        return;
+                    }
+
+                    // Handle progress updates
+                    if (data.progress !== undefined && !isNaN(data.progress)) {
+                        const progressRounded = Math.round(data.progress);
+                        statusMessage.textContent = `Processing... ${progressRounded}% complete`;
+                        updateProgressBar(progressRounded);
+                    }
+
+                    // Append any vendor rows
+                    if (data.description && data.vendors) {
+                        appendRowToTable(data);
+                    }
+
+                    // If complete, finalize
+                    if (data.complete) {
+                        isComplete = true;
+                        statusMessage.textContent = "All parts processed!";
+                        updateProgressBar(100);
+
+                        console.log("Final aggregated results:", data.results);
+
+                        // Optionally hide the status message after a short delay
+                        setTimeout(() => {
+                            statusMessage.style.display = 'none';
+                        }, 1000);
+
+                        // Override the error handler so no future errors rewrite the status
+                        eventSource.onerror = () => { };
+                        eventSource.close();
+                    }
+                };
+            } catch (error) {
+                console.error('Submission error:', error);
+                statusMessage.textContent = 'Error submitting parts to the server.';
+            }
         });
-      
+
         // Progress Bar
         function updateProgressBar(percentage) {
-          progressBar.style.width = `${percentage}%`;
-          progressBar.textContent = `${percentage}%`;
+            progressBar.style.width = `${percentage}%`;
+            progressBar.textContent = `${percentage}%`;
         }
-      
+
         // Append Row
         function appendRowToTable(update) {
-          const { description, vendors } = update;
-      
-          // Build header if empty
-          if (tableHead.rows.length === 0 && vendors && vendors.length > 0) {
-            const headerRow = document.createElement('tr');
-            const descHeader = document.createElement('th');
-            descHeader.textContent = "Description";
-            headerRow.appendChild(descHeader);
-      
+            const { description, vendors } = update;
+
+            // Build header if empty
+            if (tableHead.rows.length === 0 && vendors && vendors.length > 0) {
+                const headerRow = document.createElement('tr');
+                const descHeader = document.createElement('th');
+                descHeader.textContent = "Description";
+                headerRow.appendChild(descHeader);
+
+                vendors.forEach(vendorResult => {
+                    const vendorHeader = document.createElement('th');
+                    vendorHeader.textContent = vendorResult.vendorDisplayName || vendorResult.vendor;
+                    headerRow.appendChild(vendorHeader);
+                });
+
+                tableHead.appendChild(headerRow);
+            }
+
+            const newRow = document.createElement('tr');
+
+            // Description cell
+            const descriptionCell = document.createElement('td');
+            descriptionCell.textContent = description;
+            newRow.appendChild(descriptionCell);
+
+            // One cell per vendor
             vendors.forEach(vendorResult => {
-              const vendorHeader = document.createElement('th');
-              vendorHeader.textContent = vendorResult.vendorDisplayName || vendorResult.vendor;
-              headerRow.appendChild(vendorHeader);
+                const cell = document.createElement('td');
+                if (vendorResult.partNumber && vendorResult.partNumber !== "N/A") {
+                    const link = document.createElement('a');
+                    link.href = getLinkPrefix(vendorResult.vendor) + vendorResult.partNumber;
+                    link.target = '_blank';
+                    link.textContent = vendorResult.partNumber;
+                    cell.appendChild(link);
+                } else {
+                    cell.textContent = '-';
+                }
+                if (vendorResult.explanation) {
+                    const infoIcon = document.createElement('span');
+                    infoIcon.className = 'info-icon';
+                    infoIcon.textContent = ' i';
+                    const tooltip = document.createElement('span');
+                    tooltip.className = 'reason-tooltip';
+                    tooltip.textContent = vendorResult.explanation;
+                    infoIcon.appendChild(tooltip);
+                    cell.appendChild(infoIcon);
+                }
+                newRow.appendChild(cell);
             });
-      
-            tableHead.appendChild(headerRow);
-          }
-      
-          const newRow = document.createElement('tr');
-      
-          // Description cell
-          const descriptionCell = document.createElement('td');
-          descriptionCell.textContent = description;
-          newRow.appendChild(descriptionCell);
-      
-          // One cell per vendor
-          vendors.forEach(vendorResult => {
-            const cell = document.createElement('td');
-            if (vendorResult.partNumber && vendorResult.partNumber !== "N/A") {
-              const link = document.createElement('a');
-              link.href = getLinkPrefix(vendorResult.vendor) + vendorResult.partNumber;
-              link.target = '_blank';
-              link.textContent = vendorResult.partNumber;
-              cell.appendChild(link);
-            } else {
-              cell.textContent = '-';
-            }
-            if (vendorResult.explanation) {
-              const infoIcon = document.createElement('span');
-              infoIcon.className = 'info-icon';
-              infoIcon.textContent = ' i';
-              const tooltip = document.createElement('span');
-              tooltip.className = 'reason-tooltip';
-              tooltip.textContent = vendorResult.explanation;
-              infoIcon.appendChild(tooltip);
-              cell.appendChild(infoIcon);
-            }
-            newRow.appendChild(cell);
-          });
-      
-          tableBody.appendChild(newRow);
+
+            tableBody.appendChild(newRow);
         }
-      
+
         // Build URL prefix
         function getLinkPrefix(vendorName) {
-          switch ((vendorName || "").toLowerCase()) {
-            case 'border states':
-            case 'borderstates':
-              return 'https://www.borderstates.com/p/';
-            case 'graybar':
-              return 'https://www.graybar.com/p/';
-            default:
-              return 'https://example.com/search?q=';
-          }
+            switch ((vendorName || "").toLowerCase()) {
+                case 'border states':
+                case 'borderstates':
+                    return 'https://www.borderstates.com/p/';
+                case 'graybar':
+                    return 'https://www.graybar.com/p/';
+                default:
+                    return 'https://example.com/search?q=';
+            }
         }
-      </script>
-      
-      
+    </script>
+
+
 
 </body>
 
