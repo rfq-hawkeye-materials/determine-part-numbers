@@ -128,6 +128,7 @@
 
     <button id="recordBtn">Record</button>
     <button id="submitBtn">Submit</button>
+    <button id="stopBtn" style="display: none;">STOP</button>
 
     <div class="status" id="statusMessage"></div>
     <!-- Progress bar container, hidden by default -->
@@ -155,9 +156,52 @@
     </div>
 
     <script>
+
+        // Known color parser helper function from before
+        function parsePartDescription(input) {
+            // Define a set of known color words.
+            const knownColors = new Set(['red', 'blue', 'green', 'orange', 'yellow', 'brown', 'gray', 'grey', 'purple', 'pink', 'black', 'white']);
+
+            // Trim whitespace and remove any leading quantity info (e.g., "4 -").
+            let trimmed = input.trim().replace(/^\d+\s*-\s*/, '').trim();
+
+            // Remove the word "each" (case-insensitive) since it shouldn't appear in the final descriptions.
+            trimmed = trimmed.replace(/\beach\b/gi, '').trim();
+
+            // Remove trailing punctuation (if any).
+            trimmed = trimmed.replace(/[.,;]+$/, '').trim();
+
+            // Split the string into tokens using whitespace and commas as delimiters.
+            const tokens = trimmed.split(/[\s,]+/);
+
+            // Walk backwards from the end, collecting tokens that match known colors.
+            let colorTokens = [];
+            let index = tokens.length - 1;
+            while (index >= 0 && knownColors.has(tokens[index].toLowerCase())) {
+                // Prepend to preserve original order.
+                colorTokens.unshift(tokens[index]);
+                index--;
+            }
+
+            // If two or more colors are detected at the end, split into separate descriptions.
+            if (colorTokens.length >= 2) {
+                // Everything before the colors is considered the base description.
+                let baseDescription = tokens.slice(0, index + 1).join(' ').trim();
+                // Remove a trailing "in" if present.
+                baseDescription = baseDescription.replace(/\bin\b$/i, '').trim();
+
+                // Return one description per color.
+                return colorTokens.map(color => `${baseDescription} ${color}`.trim());
+            }
+
+            // If fewer than two color tokens are found, return the original input.
+            return [input];
+        }
+
         const GCF_ENDPOINT = 'https://us-central1-spring-archive-445317-n4.cloudfunctions.net/get-part-numbers';
 
         const submitBtn = document.getElementById('submitBtn');
+        const stopBtn = document.getElementById('stopBtn');
         const partsInput = document.getElementById('partsInput');
         const statusMessage = document.getElementById('statusMessage');
         const progressBar = document.getElementById('progressBar');
@@ -165,12 +209,16 @@
         const table = document.getElementById('partNumbersTable');
         const tableHead = table.querySelector('thead');
         const tableBody = table.querySelector('tbody');
+        const progressContainer = document.getElementById('progressContainer');
 
         let isComplete = false;       // True once we've received the "complete" message.
         let hasReceivedData = false;  // True once we've received any data messages.
         let eventSource;
 
         submitBtn.addEventListener('click', async () => {
+            // Show the STOP button when the process begins.
+            stopBtn.style.display = 'inline-block';
+
             progressContainer.style.display = 'block';
             const partsText = partsInput.value.trim();
             if (!partsText) {
@@ -178,7 +226,17 @@
                 return;
             }
 
-            const descriptions = partsText.split(/\n+/); // Split by line breaks
+            // Split the input into lines and process each one.
+            const lines = partsText.split(/\n+/);
+            let descriptions = [];
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed) {
+                    descriptions.push(...parsePartDescription(trimmed));
+                }
+            });
+            // Update the text area so the user sees what will be submitted.
+            partsInput.value = descriptions.join('\n');
 
             // Clear previous results.
             tableHead.innerHTML = '';
@@ -216,6 +274,7 @@
                         console.warn("Late EventSource error after data was received:", error);
                     }
                     eventSource.close();
+                    stopBtn.style.display = 'none';
                 };
 
                 eventSource.onmessage = (event) => {
@@ -239,6 +298,7 @@
                     if (data.error) {
                         statusMessage.textContent = `Error: ${data.error}`;
                         eventSource.close();
+                        stopBtn.style.display = 'none';
                         return;
                     }
 
@@ -270,13 +330,28 @@
                         // Override the error handler so no future errors rewrite the status
                         eventSource.onerror = () => { };
                         eventSource.close();
+                        stopBtn.style.display = 'none';
                     }
                 };
             } catch (error) {
                 console.error('Submission error:', error);
                 statusMessage.textContent = 'Error submitting parts to the server.';
+                stopBtn.style.display = 'none';
             }
         });
+
+        // STOP button handler.
+        stopBtn.addEventListener('click', () => {
+            if (eventSource) {
+                console.log("User requested to stop the connection.");
+                eventSource.close();
+                statusMessage.textContent = "Process stopped by user.";
+                stopBtn.style.display = 'none';
+                // Optionally reset progress bar or clean up any UI state here.
+                updateProgressBar(0);
+            }
+        });
+
 
         // Progress Bar
         function updateProgressBar(percentage) {
@@ -339,7 +414,7 @@
             tableBody.appendChild(newRow);
         }
 
-        // Build URL prefix
+        // Build URL prefix based on vendor
         function getLinkPrefix(vendorName) {
             switch ((vendorName || "").toLowerCase()) {
                 case 'border states':

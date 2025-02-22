@@ -37,8 +37,25 @@ function cleanDescription(description) {
     return description.replace(/^\d+\s*('|"|in|ft|lb|pack|pcs|feet)?\.?\s*-?\s*/i, "").trim();
 }
 
-// Helper function: Generate prompt for ChatGPT
-function generateGraybarPrompt(description, matches) {
+function joinAndNumberSentences(...sentences) {
+    return sentences
+        .map((sentence, index) => `${index + 1}. ${sentence}`)
+        .join(' ');
+}
+
+/**
+ * Generates a prompt for a vendor using semantic search results, and (optionally) realtime search results.
+ */
+function generateChatGPTPrompt(vendorDisplayName, description, matches, includeRealtimeTank = false) {
+
+    const analyzeSteps = [
+        'Inferring the core category or type of the requested item from its description.',
+        'Evaluating each candidate part to determine if it belongs to that inferred category.',
+        'Considering the semantic similarity from the Pinecone query and the consistency of product type.',
+        'Selecting the candidate that best aligns with the intended part type.'
+    ];
+    if (includeRealtimeTank) analyzeSteps.splice(2, 0, ['Giving the highest priority to the realtime search results score, knowing that the best candidate is usually near the top of realtime search results.']);
+
     const matchDetails = matches
         .map(
             (match, index) =>
@@ -52,22 +69,19 @@ function generateGraybarPrompt(description, matches) {
 A customer has requested the following item:
 "${description}"
 
-Based on a semantic search and realtime search from Graybar's website (which should be given heavy weight in decision-making), here are the top ${matches.length} closest matches from Graybar's inventory:
+Based on a semantic search and realtime search from ${vendorDisplayName}'s website (which should be given heavy weight in decision-making), here are the top ${matches.length} closest matches from Graybar's inventory:
 ${matchDetails}
 
 Critically analyze the provided matches by:
-1. Inferring the core category or type of the requested item from its description.
-2. Evaluating each candidate part to determine if it belongs to that inferred category.
-3. Giving the highest priority to the realtime search results score, knowing that the best candidate is usually near the top of realtime search results.
-4. Considering the semantic similarity from the Pinecone query and the consistency of product type.
-5. Selecting the candidate that best aligns with the intended part type.
+${joinAndNumberSentences(analyzeSteps)}
 
 Use function calling to return your answer as a JSON object with two keys:
-- "vendorPartNumber": the best matching Graybar part number.
+- "vendorPartNumber": the best matching ${vendorDisplayName} part number.
 - "explanation": a concise explanation of your reasoning, including how you inferred the intended category and why the selected part is the best match.
 
 Return only the JSON response, nothing else.`;
 }
+
 
 //
 // API CALLS WITH RETRY
@@ -91,7 +105,7 @@ async function getEmbedding(description) {
 }
 
 // Helper: Call ChatGPT with function calling for a structured response (with retry)
-async function getChatGPTResponse(prompt) {
+async function getChatGPTResponse(vendorDisplayName, prompt) {
     const response = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -104,13 +118,13 @@ async function getChatGPTResponse(prompt) {
             functions: [
                 {
                     name: "select_best_match",
-                    description: "Determines the most accurate Graybar part number match based on the RFQ request and provided matches.",
+                    description: `Determines the most accurate ${vendorDisplayName} part number match based on the RFQ request and provided matches.`,
                     parameters: {
                         type: "object",
                         properties: {
                             vendorPartNumber: {
                                 type: "string",
-                                description: "The most relevant Graybar part number for the RFQ."
+                                description: `The most relevant ${vendorDisplayName} part number for the RFQ.`
                             },
                             explanation: {
                                 type: "string",
@@ -138,97 +152,6 @@ async function getChatGPTResponse(prompt) {
     }
 
     throw new Error("Function call did not return the expected result");
-}
-
-//
-// VENDOR HANDLERS
-//
-
-// Border States handler (placeholder)
-async function handleBorderStates(descriptions) {
-    // Placeholder function for Border States
-    return { vendor: 'borderStates', vendorDisplayName: 'Border States', partNumbers: [] };
-}
-
-// Graybar handler with sequential processing and exponential backoff
-async function handleGraybar(descriptions) {
-    try {
-        // Initialize Pinecone client
-        const pinecone = new Pinecone({
-            apiKey: process.env.PINECONE_API_KEY
-        });
-        const index = pinecone.index('graybar', 'https://graybar-e2q2cke.svc.aped-4627-b74a.pinecone.io');
-
-        const pineconeResults = [];
-        // Process each description sequentially
-        for (const description of descriptions) {
-            // Get embedding with backoff
-            const vector = await getEmbedding(description);
-
-            const queryRequest = {
-                topK: 100,
-                vector,
-                includeMetadata: true,
-            };
-
-            const queryResponse = await index.query(queryRequest);
-            console.log("Query response:", queryResponse);
-
-            // Map over matches returned by Pinecone
-            let matches = queryResponse.matches.map((match) => ({
-                partNumber: match.metadata?.part_number || 'N/A',
-                description: match.metadata.description || '',
-                score: match.score || 0,
-                metadata: match.metadata,
-            }));
-
-            // --- Incorporate Realtime Search from Graybar's Website ---
-            let realtimeResults = [];
-            try {
-                realtimeResults = await getRealtimeGraybarResults(description);
-            } catch (err) {
-                console.error("Realtime search failed for description:", description, err);
-                realtimeResults = [];
-            }
-
-            // Update scores based on realtime results order
-            matches.forEach(match => {
-                const rtIndex = realtimeResults.indexOf(match.partNumber) + 1;
-                if (rtIndex) {
-                    match.realtimeRank = rtIndex;
-                } else {
-                    match.realtimeRank = 9999; // Unranked items go to the bottom
-                }
-            });
-
-            // Sort matches by realtime rank (lower is better)
-            matches.sort((a, b) => a.realtimeRank - b.realtimeRank);
-
-            pineconeResults.push({ description, matches });
-        }
-
-        // Use ChatGPT to determine the best match for each description sequentially
-        const chatGPTResults = [];
-        for (const { description, matches } of pineconeResults) {
-            const prompt = generateGraybarPrompt(description, matches);
-            const bestMatch = await getChatGPTResponse(prompt);
-            console.log(`Explanation for "${description}": ${bestMatch.explanation}`);
-            chatGPTResults.push({ description, bestMatch });
-        }
-
-        // Format and return the vendor response
-        return {
-            vendor: "graybar",
-            vendorDisplayName: "Graybar",
-            partNumbers: chatGPTResults.map(({ bestMatch }) => ({
-                vendorPartNumber: bestMatch?.vendorPartNumber || "N/A",
-                explanation: bestMatch?.explanation || "N/A",
-            })),
-        };
-    } catch (error) {
-        console.error("Error handling Graybar:", error);
-        return null;
-    }
 }
 
 // Helper: Get realtime Graybar search results
@@ -306,11 +229,11 @@ http('getPartNumbers', async (req, res) => {
         const vendors = [];
 
         // --- 4. Border States ---
-        const borderStates = await handleBorderStates(descriptions);
+        const borderStates = await handleVendor(descriptions, processBorderStates, "borderStates", "Border States");
         if (borderStates) vendors.push(borderStates);
 
         // --- 5. Graybar ---
-        const graybar = await handleGraybar(descriptions);
+        const graybar = await handleVendor(descriptions, processGraybar, "graybar", "Graybar");
         if (graybar) vendors.push(graybar);
 
         // --- 6. Return Consolidated Response ---
@@ -341,10 +264,25 @@ http('getPartNumbers', async (req, res) => {
             res.write(`data: {}\n\n`);
         }, 30000);
 
+        // Flag to track if the client has disconnected (i.e., pressed STOP)
+        let clientDisconnected = false;
+        req.on('close', () => {
+            console.log("Client disconnected. Cancelling further processing.");
+            clientDisconnected = true;
+            clearInterval(heartbeat);
+        });
+
+
         const allResults = [];
 
         // Process descriptions sequentially with progress updates
         for (let i = 0; i < descriptions.length; i++) {
+
+            if (clientDisconnected) {
+                console.log("Processing stopped due to client disconnection.");
+                break;
+            }
+
             const description = descriptions[i];
 
             // Process all vendors for this description and gather the results
@@ -360,9 +298,11 @@ http('getPartNumbers', async (req, res) => {
         }
 
         // Send final completion message with all results
-        res.write(`data: ${JSON.stringify({ complete: true, results: allResults })}\n\n`);
-        res.end();
-        clearInterval(heartbeat);
+        if (!clientDisconnected) {
+            res.write(`data: ${JSON.stringify({ complete: true, results: allResults })}\n\n`);
+            res.end();
+            clearInterval(heartbeat);
+        }
         return;
     } else {
         return res.status(405).json({ error: "Method not allowed." });
@@ -396,31 +336,127 @@ async function processAllVendorsForDescription(description) {
 
 
 /**
- * Simulated vendor processing function for Border States.
+ * Unified vendor processing helper.
+ * Options:
+ *   - vendor: internal vendor key (e.g., "graybar" or "borderStates")
+ *   - displayName: Vendor display name.
+ *   - indexName: Pinecone index name.
+ *   - pineconeURL: URL for the Pinecone index.
+ *   - realtime: Boolean indicating whether realtime search adjustments should be applied.
  */
-async function processBorderStates(description) {
-    // Simulate processing delay (replace with actual processing logic)
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    return {
-        vendorDisplayName: "Border States",
-        vendor: "borderStates",
-        description,
-        partNumber: '',
-        explanation: '',
-    };
+async function processVendor(description, options) {
+    try {
+        // Initialize Pinecone client and select the vendor's index.
+        const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+        const index = pinecone.index(options.indexName, options.pineconeURL);
+
+        // Get embedding for the description.
+        const vector = await getEmbedding(description);
+
+        // Query Pinecone.
+        const queryRequest = {
+            topK: 100,
+            vector,
+            includeMetadata: true,
+            ...(options.namespace && { namespace: options.namespace })
+        };
+        const queryResponse = await index.query(queryRequest);
+
+        // Map over returned matches.
+        let matches = queryResponse.matches.map(match => ({
+            partNumber: match.metadata?.part_number || 'N/A',
+            description: match.metadata?.description || '',
+            score: match.score || 0,
+            metadata: match.metadata,
+        }));
+
+        // First, sort by score (higher is better).
+        matches.sort((a, b) => b.score - a.score);
+
+        // If realtime adjustments are enabled, incorporate realtime search results.
+        if (options.realtime) {
+            let realtimeResults = [];
+            try {
+                realtimeResults = await getRealtimeGraybarResults(description);
+            } catch (err) {
+                console.error("Realtime search failed for description:", description, err);
+            }
+            matches.forEach(match => {
+                const rtIndex = realtimeResults.indexOf(match.partNumber) + 1;
+                match.realtimeRank = rtIndex || 9999;
+            });
+            // Sort matches by realtime rank (lower is better).
+            matches.sort((a, b) => a.realtimeRank - b.realtimeRank);
+        }
+
+        // Generate prompt using a unified ChatGPT prompt generator.
+        // For Graybar, the 'realtime' flag is true; for Border States, false.
+        const prompt = generateChatGPTPrompt(options.displayName, description, matches, options.realtime);
+        const bestMatch = await getChatGPTResponse(options.displayName, prompt);
+
+        return {
+            vendorDisplayName: options.displayName,
+            vendor: options.vendor,
+            description,
+            partNumber: bestMatch.vendorPartNumber || "N/A",
+            explanation: bestMatch.explanation || ""
+        };
+    } catch (error) {
+        console.error(`Error processing ${options.displayName} for description:`, description, error);
+        return {
+            vendorDisplayName: options.displayName,
+            vendor: options.vendor,
+            description,
+            partNumber: "N/A",
+            explanation: error.message || "Error processing description"
+        };
+    }
 }
 
 /**
- * Simulated vendor processing function for Graybar.
+ * Wrapper for Graybar vendor processing.
+ * Uses realtime search adjustments.
  */
 async function processGraybar(description) {
-    // Simulate processing delay (replace with actual processing logic)
-    const graybar = await handleGraybar([description]);
-    return {
-        vendorDisplayName: "Graybar",
+    const vendorOptions = {
         vendor: "graybar",
-        description,
-        partNumber: graybar.partNumbers[0].vendorPartNumber,
-        explanation: graybar.partNumbers[0].explanation
+        displayName: "Graybar",
+        indexName: "graybar",
+        pineconeURL: "https://graybar-e2q2cke.svc.aped-4627-b74a.pinecone.io",
+        realtime: true
+    };
+    return await processVendor(description, vendorOptions);
+}
+
+/**
+ * Wrapper for Border States vendor processing.
+ * Does NOT use realtime search.
+ */
+async function processBorderStates(description) {
+    const vendorOptions = {
+        vendor: "borderStates",
+        displayName: "Border States",
+        indexName: "borderstates",
+        pineconeURL: "https://vendors-e2q2cke.svc.aped-4627-b74a.pinecone.io",
+        realtime: false,
+        namespace: "borderStates"
+    };
+    return await processVendor(description, vendorOptions);
+}
+
+/**
+ * Handler for processing multiple descriptions for a vendor.
+ * Aggregates results into a standardized response.
+ */
+async function handleVendor(descriptions, processFunction, vendorKey, displayName) {
+    const results = [];
+    for (const description of descriptions) {
+        const result = await processFunction(description);
+        results.push(result);
+    }
+    return {
+        vendor: vendorKey,
+        vendorDisplayName: displayName,
+        partNumbers: results
     };
 }
