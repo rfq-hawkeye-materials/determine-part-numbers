@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Part Number Collector</title>
     <style>
+        /* Existing styles ... */
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
@@ -62,12 +63,10 @@
             background-color: #eee;
         }
 
-
         .info-icon:hover .reason-tooltip {
             visibility: visible;
             opacity: 1;
         }
-
 
         .reason-tooltip {
             visibility: hidden;
@@ -79,44 +78,65 @@
             position: absolute;
             z-index: 999;
             top: 25px;
-            /* Position below the icon */
             left: 0;
             transition: opacity 0.2s, visibility 0.2s;
             display: block;
-            /* Ensures proper width behavior */
             max-width: 600px;
-            /* Adjust width to suit your needs */
             min-width: 300px;
-            /* Prevents it from being too narrow */
             white-space: normal;
-            /* Ensures text wraps properly */
             word-wrap: break-word;
-            /* Prevents long words from breaking layout */
             text-align: left;
-            /* Aligns text properly instead of center */
             font-size: 14px;
-            /* Ensures readable font */
             line-height: 1.4;
-            /* Adjusts spacing to look natural */
         }
 
-        #progressContainer {
+        /* New: Feedback Icon */
+        .feedback-icon {
+            display: inline-block;
+            margin-left: 4px;
+            color: #007BFF;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* Modal Styles */
+        #feedbackModal {
+            display: none;
+            /* Hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
             width: 100%;
-            background: #eee;
-            border: 1px solid #ccc;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        #feedbackModal .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 300px;
             border-radius: 4px;
+        }
+
+        #feedbackModal label {
+            display: block;
             margin-top: 10px;
         }
 
-        #progressBar {
-            width: 0%;
-            background: #4caf50;
-            height: 20px;
-            border-radius: 4px;
-            text-align: center;
-            color: white;
-            line-height: 20px;
-            transition: width 0.3s ease;
+        #feedbackModal input,
+        #feedbackModal textarea {
+            width: 100%;
+            padding: 8px;
+            margin-top: 4px;
+            box-sizing: border-box;
+        }
+
+        #feedbackModal button {
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -125,76 +145,81 @@
     <h1>Part Number Collector</h1>
     <p>Type the parts you need in the box below, or click "Record" to speak them aloud.</p>
     <textarea id="partsInput" placeholder="1000 feet of 2-inch EMT..."></textarea><br />
-
     <button id="recordBtn">Record</button>
     <button id="submitBtn">Submit</button>
     <button id="stopBtn" style="display: none;">STOP</button>
-
     <div class="status" id="statusMessage"></div>
-    <!-- Progress bar container, hidden by default -->
     <div id="progressContainer"
         style="display: none; width: 100%; background: #eee; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px;">
         <div id="progressBar"
             style="width: 0%; background: #4caf50; height: 20px; border-radius: 4px; text-align: center; color: white; line-height: 20px;">
-            0%
-        </div>
+            0%</div>
     </div>
-
-
-
     <!-- Table for displaying results -->
     <div id="partNumbersTableContainer" style="display: none; margin-top: 20px;">
         <h3>Part Numbers:</h3>
         <table id="partNumbersTable" style="width: 100%; border-collapse: collapse; text-align: left;">
-            <thead>
-                <!-- Rows will be added dynamically -->
-            </thead>
-            <tbody>
-                <!-- Rows will be added dynamically -->
-            </tbody>
+            <thead></thead>
+            <tbody></tbody>
         </table>
     </div>
 
-    <script>
+    <!-- Feedback Modal -->
+    <div id="feedbackModal">
+        <div class="modal-content">
+            <h3>Report Feedback</h3>
+            <form id="feedbackForm">
+                <input type="hidden" id="feedbackVendor" />
+                <input type="hidden" id="feedbackDescription" />
+                <label for="correctPartNumber">Correct Part Number:</label>
+                <input type="text" id="correctPartNumber" required />
+                <label for="feedbackExplanation">Explanation (optional):</label>
+                <textarea id="feedbackExplanation" rows="3"></textarea>
+                <button type="submit">Submit Feedback</button>
+                <button type="button" id="cancelFeedback">Cancel</button>
+            </form>
+        </div>
 
+        <!-- Toast container -->
+        <div id="toast" style="
+visibility: hidden;
+min-width: 250px;
+background-color: #333;
+color: #fff;
+text-align: center;
+border-radius: 4px;
+padding: 16px;
+position: fixed;
+z-index: 1001;
+left: 50%;
+bottom: 30px;
+transform: translateX(-50%);
+font-size: 16px;
+">
+            Feedback submitted successfully!
+        </div>
+
+    </div>
+
+    <script>
         // Known color parser helper function from before
         function parsePartDescription(input) {
-            // Define a set of known color words.
             const knownColors = new Set(['red', 'blue', 'green', 'orange', 'yellow', 'brown', 'gray', 'grey', 'purple', 'pink', 'black', 'white']);
-
-            // Trim whitespace and remove any leading quantity info (e.g., "4 -").
             let trimmed = input.trim().replace(/^\d+\s*-\s*/, '').trim();
-
-            // Remove the word "each" (case-insensitive) since it shouldn't appear in the final descriptions.
             trimmed = trimmed.replace(/\beach\b/gi, '').trim();
-
-            // Remove trailing punctuation (if any).
             trimmed = trimmed.replace(/[.,;]+$/, '').trim();
-
-            // Split the string into tokens using whitespace and commas as delimiters.
             const tokens = trimmed.split(/[\s,]+/);
-
-            // Walk backwards from the end, collecting tokens that match known colors.
             let colorTokens = [];
             let index = tokens.length - 1;
             while (index >= 0 && knownColors.has(tokens[index].toLowerCase())) {
-                // Prepend to preserve original order.
                 colorTokens.unshift(tokens[index]);
                 index--;
             }
-
-            // If two or more colors are detected at the end, split into separate descriptions.
             if (colorTokens.length >= 2) {
-                // Everything before the colors is considered the base description.
                 let baseDescription = tokens.slice(0, index + 1).join(' ').trim();
-                // Remove a trailing "in" if present.
                 baseDescription = baseDescription.replace(/\bin\b$/i, '').trim();
-
-                // Return one description per color.
                 return colorTokens.map(color => `${baseDescription} ${color}`.trim());
             }
-
-            // If fewer than two color tokens are found, return the original input.
             return [input];
         }
 
@@ -211,22 +236,18 @@
         const tableBody = table.querySelector('tbody');
         const progressContainer = document.getElementById('progressContainer');
 
-        let isComplete = false;       // True once we've received the "complete" message.
-        let hasReceivedData = false;  // True once we've received any data messages.
+        let isComplete = false;
+        let hasReceivedData = false;
         let eventSource;
 
         submitBtn.addEventListener('click', async () => {
-            // Show the STOP button when the process begins.
             stopBtn.style.display = 'inline-block';
-
             progressContainer.style.display = 'block';
             const partsText = partsInput.value.trim();
             if (!partsText) {
                 statusMessage.textContent = 'Please enter some part descriptions first.';
                 return;
             }
-
-            // Split the input into lines and process each one.
             const lines = partsText.split(/\n+/);
             let descriptions = [];
             lines.forEach(line => {
@@ -235,99 +256,50 @@
                     descriptions.push(...parsePartDescription(trimmed));
                 }
             });
-            // Update the text area so the user sees what will be submitted.
             partsInput.value = descriptions.join('\n');
-
-            // Clear previous results.
             tableHead.innerHTML = '';
             tableBody.innerHTML = '';
             tableContainer.style.display = 'block';
             statusMessage.style.display = 'block';
             statusMessage.textContent = `Submitting ${descriptions.length} part(s)...`;
             updateProgressBar(0);
-
             isComplete = false;
-            hasReceivedData = false; // Reset for a new submission
-
+            hasReceivedData = false;
             try {
                 const url = `${GCF_ENDPOINT}?descriptions=${encodeURIComponent(JSON.stringify(descriptions))}`;
                 eventSource = new EventSource(url);
                 console.log("Connecting to:", url);
-
-                eventSource.onopen = () => {
-                    console.log("Connection opened.");
-                };
-
+                eventSource.onopen = () => { console.log("Connection opened."); };
                 eventSource.onerror = (error) => {
-                    // If we've already completed, do nothing (ignore).
-                    if (isComplete) {
-                        console.log("Ignoring error event after completion:", error);
-                        return;
-                    }
-                    // If we haven't received any data yet, this is likely a genuine connection issue.
-                    if (!hasReceivedData) {
-                        console.error("EventSource connection failed before any data arrived:", error);
-                        statusMessage.textContent = "Error: Connection lost.";
-                    } else {
-                        // We *have* received some data, so this error might just be the server closing or a final SSE glitch.
-                        // Usually, we just log it or ignore it to avoid overwriting the UI.
-                        console.warn("Late EventSource error after data was received:", error);
-                    }
+                    if (isComplete) { console.log("Ignoring error event after completion:", error); return; }
+                    if (!hasReceivedData) { console.error("EventSource connection failed before any data arrived:", error); statusMessage.textContent = "Error: Connection lost."; }
+                    else { console.warn("Late EventSource error after data was received:", error); }
                     eventSource.close();
                     stopBtn.style.display = 'none';
                 };
-
                 eventSource.onmessage = (event) => {
                     let data = {};
-                    try {
-                        data = JSON.parse(event.data);
-                    } catch (err) {
-                        console.error("Error parsing SSE data:", err);
-                        return;
-                    }
-
-                    // Ignore heartbeat or empty updates
-                    if (!data.description && !data.vendors && data.progress === undefined) {
-                        return;
-                    }
-
-                    // We received meaningful data, so track that fact.
+                    try { data = JSON.parse(event.data); } catch (err) { console.error("Error parsing SSE data:", err); return; }
+                    if (!data.description && !data.vendors && data.progress === undefined) return;
                     hasReceivedData = true;
-
-                    // If the server sends back an error in the data itself
                     if (data.error) {
                         statusMessage.textContent = `Error: ${data.error}`;
                         eventSource.close();
                         stopBtn.style.display = 'none';
                         return;
                     }
-
-                    // Handle progress updates
                     if (data.progress !== undefined && !isNaN(data.progress)) {
                         const progressRounded = Math.round(data.progress);
                         statusMessage.textContent = `Processing... ${progressRounded}% complete`;
                         updateProgressBar(progressRounded);
                     }
-
-                    // Append any vendor rows
-                    if (data.description && data.vendors) {
-                        appendRowToTable(data);
-                    }
-
-                    // If complete, finalize
+                    if (data.description && data.vendors) { appendRowToTable(data); }
                     if (data.complete) {
                         isComplete = true;
                         statusMessage.textContent = "All parts processed!";
                         updateProgressBar(100);
-
                         console.log("Final aggregated results:", data.results);
-
-                        // Optionally hide the status message after a short delay
-                        setTimeout(() => {
-                            statusMessage.style.display = 'none';
-                        }, 1000);
-
-                        // Override the error handler so no future errors rewrite the status
+                        setTimeout(() => { statusMessage.style.display = 'none'; }, 1000);
                         eventSource.onerror = () => { };
                         eventSource.close();
                         stopBtn.style.display = 'none';
@@ -340,53 +312,40 @@
             }
         });
 
-        // STOP button handler.
         stopBtn.addEventListener('click', () => {
             if (eventSource) {
                 console.log("User requested to stop the connection.");
                 eventSource.close();
                 statusMessage.textContent = "Process stopped by user.";
                 stopBtn.style.display = 'none';
-                // Optionally reset progress bar or clean up any UI state here.
                 updateProgressBar(0);
             }
         });
 
-
-        // Progress Bar
         function updateProgressBar(percentage) {
             progressBar.style.width = `${percentage}%`;
             progressBar.textContent = `${percentage}%`;
         }
 
-        // Append Row
+        // Append Row including info and feedback icons.
         function appendRowToTable(update) {
             const { description, vendors } = update;
-
-            // Build header if empty
             if (tableHead.rows.length === 0 && vendors && vendors.length > 0) {
                 const headerRow = document.createElement('tr');
                 const descHeader = document.createElement('th');
                 descHeader.textContent = "Description";
                 headerRow.appendChild(descHeader);
-
                 vendors.forEach(vendorResult => {
                     const vendorHeader = document.createElement('th');
                     vendorHeader.textContent = vendorResult.vendorDisplayName || vendorResult.vendor;
                     headerRow.appendChild(vendorHeader);
                 });
-
                 tableHead.appendChild(headerRow);
             }
-
             const newRow = document.createElement('tr');
-
-            // Description cell
             const descriptionCell = document.createElement('td');
             descriptionCell.textContent = description;
             newRow.appendChild(descriptionCell);
-
-            // One cell per vendor
             vendors.forEach(vendorResult => {
                 const cell = document.createElement('td');
                 if (vendorResult.partNumber && vendorResult.partNumber !== "N/A") {
@@ -398,6 +357,7 @@
                 } else {
                     cell.textContent = '-';
                 }
+                // Info icon with tooltip.
                 if (vendorResult.explanation) {
                     const infoIcon = document.createElement('span');
                     infoIcon.className = 'info-icon';
@@ -408,13 +368,22 @@
                     infoIcon.appendChild(tooltip);
                     cell.appendChild(infoIcon);
                 }
+
+                const feedbackIcon = document.createElement('span');
+                feedbackIcon.className = 'feedback-icon';
+                feedbackIcon.textContent = '✎';  // Unicode pencil or choose an icon
+                feedbackIcon.title = 'Report feedback';
+                // Set data attributes for later use.
+                feedbackIcon.dataset.vendor = vendorResult.vendor;
+                feedbackIcon.dataset.description = description;
+                feedbackIcon.dataset.partNumber = vendorResult.partNumber;
+                feedbackIcon.addEventListener('click', openFeedbackModal);
+                cell.appendChild(feedbackIcon);
                 newRow.appendChild(cell);
             });
-
             tableBody.appendChild(newRow);
         }
 
-        // Build URL prefix based on vendor
         function getLinkPrefix(vendorName) {
             switch ((vendorName || "").toLowerCase()) {
                 case 'border states':
@@ -426,10 +395,85 @@
                     return 'https://example.com/search?q=';
             }
         }
+
+        // Feedback Modal logic
+        const feedbackModal = document.getElementById('feedbackModal');
+        const feedbackForm = document.getElementById('feedbackForm');
+        const feedbackVendorInput = document.getElementById('feedbackVendor');
+        const feedbackDescriptionInput = document.getElementById('feedbackDescription');
+        const correctPartNumberInput = document.getElementById('correctPartNumber');
+        const feedbackExplanationInput = document.getElementById('feedbackExplanation');
+        const cancelFeedbackBtn = document.getElementById('cancelFeedback');
+
+        function openFeedbackModal(event) {
+            // Retrieve vendor, description, and current part number.
+            const vendor = event.currentTarget.dataset.vendor;
+            const description = event.currentTarget.dataset.description;
+            const partNumber = event.currentTarget.dataset.partNumber;
+            // Fill hidden fields (or display in modal header if desired)
+            feedbackVendorInput.value = vendor;
+            feedbackDescriptionInput.value = description;
+            correctPartNumberInput.value = partNumber !== "N/A" ? partNumber : "";
+            feedbackExplanationInput.value = "";
+            feedbackModal.style.display = 'block';
+        }
+
+        cancelFeedbackBtn.addEventListener('click', () => {
+            feedbackModal.style.display = 'none';
+        });
+
+        feedbackForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            // Gather feedback values.
+            const vendor = feedbackVendorInput.value;
+            const description = feedbackDescriptionInput.value;
+            const correctPartNumber = correctPartNumberInput.value;
+            const explanation = feedbackExplanationInput.value;
+            const feedbackPayload = {
+                vendor,
+                description,
+                correctPartNumber,
+                explanation
+            };
+            console.log("Submitting feedback:", feedbackPayload);
+            try {
+                const response = await fetch(`https://feedback-491261825965.us-central1.run.app/feedback`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(feedbackPayload)
+                });
+                if (!response.ok) {
+                    throw new Error(`Feedback submission failed: ${response.statusText}`);
+                }
+                feedbackModal.style.display = 'none';
+                showToast("Feedback submitted successfully!");
+            } catch (error) {
+                console.error("Error submitting feedback:", error);
+                showToast("Error submitting feedback. Please try again.");
+            };
+        })
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.visibility = 'visible';
+            toast.style.opacity = '1';
+
+            // Fade out after 3 seconds
+            setTimeout(() => {
+                toast.style.transition = "opacity 0.5s ease-out";
+                toast.style.opacity = '0';
+                // After fade-out, hide the element
+                setTimeout(() => {
+                    toast.style.visibility = 'hidden';
+                    toast.style.transition = ""; // Reset transition for future toasts
+                }, 500);
+            }, 3000);
+        }
+
     </script>
-
-
-
 </body>
 
 </html>

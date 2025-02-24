@@ -3,9 +3,7 @@ const { http } = require("@google-cloud/functions-framework");
 const { Pinecone } = require('@pinecone-database/pinecone');
 const cheerio = require('cheerio');
 
-//
 // HELPER FUNCTIONS
-//
 
 // Sleep helper (returns a promise that resolves after ms milliseconds)
 async function sleep(ms) {
@@ -86,23 +84,6 @@ Return only the JSON response, nothing else.`;
 //
 // API CALLS WITH RETRY
 //
-
-// Helper: Get vector embedding for a description (with retry)
-async function getEmbedding(description) {
-    const response = await fetchWithRetry("https://api.openai.com/v1/embeddings", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-            input: description,
-            model: "text-embedding-ada-002",
-        }),
-    });
-    const json = await response.json();
-    return json.data[0].embedding; // Return the embedding vector
-}
 
 // Helper: Call ChatGPT with function calling for a structured response (with retry)
 async function getChatGPTResponse(vendorDisplayName, prompt) {
@@ -346,32 +327,64 @@ async function processAllVendorsForDescription(description) {
  */
 async function processVendor(description, options) {
     try {
-        // Initialize Pinecone client and select the vendor's index.
-        const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-        const index = pinecone.index(options.indexName, options.pineconeURL);
 
-        // Get embedding for the description.
-        const vector = await getEmbedding(description);
+        if (options.checkCorrections) {
+            const correctionResult = await checkCorrections(description, options.vendor);
+            if (correctionResult) {
+                console.log("Using correction result for description:", description);
+                return {
+                    vendorDisplayName: options.displayName,
+                    vendor: options.vendor,
+                    description,
+                    partNumber: correctionResult.partNumber,
+                    explanation: correctionResult.explanation
+                };
+            }
+        }
 
-        // Query Pinecone.
-        const queryRequest = {
-            topK: 100,
-            vector,
-            includeMetadata: true,
-            ...(options.namespace && { namespace: options.namespace })
-        };
-        const queryResponse = await index.query(queryRequest);
+        const { pineconeURL, namespace } = options;
+        const url = `${pineconeURL}/records/namespaces/${namespace}/search`;
+        console.log({ url });
+
+        const payload = {
+            query: {
+                inputs: { text: description },
+                top_k: 100
+            },
+            fields: [
+                "description",
+                "part_number"
+            ],
+            rerank: {
+                model: "cohere-rerank-3.5",
+                top_n: 25,
+                rank_fields: ["text"]
+            }
+        }
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Api-Key": process.env.PINECONE_API_KEY,
+                "Content-Type": "application/json",
+                "X-Pinecone-API-Version": "2025-01"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Status ${response.status}: ${errorText}`);
+        }
+
+        const queryResponse = await response.json();
 
         // Map over returned matches.
-        let matches = queryResponse.matches.map(match => ({
-            partNumber: match.metadata?.part_number || 'N/A',
-            description: match.metadata?.description || '',
-            score: match.score || 0,
-            metadata: match.metadata,
+        let matches = queryResponse.result.hits.map(match => ({
+            partNumber: match?.fields.part_number || 'N/A',
+            description: match?.fields.description || '',
+            score: match?._score || 0
         }));
-
-        // First, sort by score (higher is better).
-        matches.sort((a, b) => b.score - a.score);
 
         // If realtime adjustments are enabled, incorporate realtime search results.
         if (options.realtime) {
@@ -421,9 +434,10 @@ async function processGraybar(description) {
     const vendorOptions = {
         vendor: "graybar",
         displayName: "Graybar",
-        indexName: "graybar",
-        pineconeURL: "https://graybar-e2q2cke.svc.aped-4627-b74a.pinecone.io",
-        realtime: true
+        pineconeURL: "https://vendors2-e2q2cke.svc.gcp-us-central1-4a9f.pinecone.io",
+        realtime: true,
+        namespace: "graybar",
+        checkCorrections: true
     };
     return await processVendor(description, vendorOptions);
 }
@@ -436,10 +450,10 @@ async function processBorderStates(description) {
     const vendorOptions = {
         vendor: "borderStates",
         displayName: "Border States",
-        indexName: "borderstates",
-        pineconeURL: "https://vendors-e2q2cke.svc.aped-4627-b74a.pinecone.io",
+        pineconeURL: "https://vendors2-e2q2cke.svc.gcp-us-central1-4a9f.pinecone.io",
         realtime: false,
-        namespace: "borderStates"
+        namespace: "borderStates",
+        checkCorrections: true
     };
     return await processVendor(description, vendorOptions);
 }
@@ -459,4 +473,58 @@ async function handleVendor(descriptions, processFunction, vendorKey, displayNam
         vendorDisplayName: displayName,
         partNumbers: results
     };
+}
+
+
+
+async function checkCorrections(description, vendor) {
+    const threshold = 0.93;
+    const url = `https://feedback-e2q2cke.svc.gcp-us-central1-4a9f.pinecone.io/records/namespaces/${vendor}/search`;
+    const payload = {
+        query: {
+            inputs: { text: description },
+            top_k: 10
+        },
+        fields: [
+            "part_number",
+            "reason"
+        ],
+        // rerank: {
+        //     model: "cohere-rerank-3.5",
+        //     top_n: 1,
+        //     rank_fields: ["text"]
+        // }
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Api-Key": process.env.PINECONE_API_KEY,
+                "Content-Type": "application/json",
+                "X-Pinecone-API-Version": "2025-01"
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Corrections query error:", response.status, errorText);
+            return null;
+        }
+        const result = await response.json();
+        // Assuming the hits are returned as result.result.hits
+        if (result?.result?.hits?.length > 0) {
+            const bestCorrection = result.result.hits[0];
+            if (bestCorrection._score && bestCorrection._score >= threshold) {
+                return {
+                    partNumber: bestCorrection.fields.part_number,
+                    explanation: `Near-perfect match found in feedback database: ${bestCorrection.fields.reason}`
+                };
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error("Error in checkCorrections:", error);
+        return null;
+    }
 }
