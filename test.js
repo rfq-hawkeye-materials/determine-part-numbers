@@ -2,7 +2,7 @@ const { EventSource } = require('eventsource');
 
 async function testFunction() {
   // Sample input: an array of part descriptions
-  const sampleInput = ["pulling lube"];
+  const sampleInput = ["wire lube"];
 
   // Encode the input as a JSON string and then URL-encode it
   const queryParam = encodeURIComponent(JSON.stringify(sampleInput));

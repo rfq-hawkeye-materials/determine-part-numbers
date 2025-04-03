@@ -138,6 +138,23 @@
         #feedbackModal button {
             margin-top: 10px;
         }
+
+        /* Toast Styles */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 4px;
+            padding: 16px;
+            position: fixed;
+            z-index: 9999;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%);
+            font-size: 16px;
+        }
     </style>
 </head>
 
@@ -179,48 +196,89 @@
                 <button type="button" id="cancelFeedback">Cancel</button>
             </form>
         </div>
+    </div>
 
-        <!-- Toast container -->
-        <div id="toast" style="
-visibility: hidden;
-min-width: 250px;
-background-color: #333;
-color: #fff;
-text-align: center;
-border-radius: 4px;
-padding: 16px;
-position: fixed;
-z-index: 1001;
-left: 50%;
-bottom: 30px;
-transform: translateX(-50%);
-font-size: 16px;
-">
-            Feedback submitted successfully!
-        </div>
+    <!-- Toast Container -->
+    <div id="toast">Feedback submitted successfully!</div>
 
     </div>
 
     <script>
-        // Known color parser helper function from before
+
+
         function parsePartDescription(input) {
-            const knownColors = new Set(['red', 'blue', 'green', 'orange', 'yellow', 'brown', 'gray', 'grey', 'purple', 'pink', 'black', 'white']);
-            let trimmed = input.trim().replace(/^\d+\s*-\s*/, '').trim();
+            const knownColors = new Set([
+                'red', 'blue', 'green', 'orange', 'yellow', 'brown',
+                'gray', 'grey', 'purple', 'pink', 'black', 'white', 'tan'
+            ]);
+            const fillers = new Set(['and']);
+
+            // 1. Trim the input.
+            let trimmed = input.trim();
+
+            // 2. Remove a leading quantity/dash pattern unless it is followed by "foot".
+            // Here we allow both hyphen (-) and en dash (–).
+            const match = trimmed.match(/^(\d+\s*[-–]\s*)(.*)$/i);
+            if (match) {
+                const [fullString, numberPart, remainder] = match;
+                // If the remainder does NOT start with "foot", remove the prefix.
+                if (/^foot\b/i.test(remainder)) {
+                    trimmed = (numberPart.replace(/\s*[-–]\s*/, '') + " " + remainder).trim();
+                } else {
+                    trimmed = remainder.trim();
+                }
+            }
+
+            // 3. Remove the word "each" (case-insensitive).
             trimmed = trimmed.replace(/\beach\b/gi, '').trim();
+
+            // 4. Remove trailing punctuation.
             trimmed = trimmed.replace(/[.,;]+$/, '').trim();
-            const tokens = trimmed.split(/[\s,]+/);
-            let colorTokens = [];
-            let index = tokens.length - 1;
-            while (index >= 0 && knownColors.has(tokens[index].toLowerCase())) {
-                colorTokens.unshift(tokens[index]);
-                index--;
+
+            // If the result starts with a number followed immediately by an apostrophe,
+            // replace the apostrophe with "foot".
+            trimmed = trimmed.replace(/^(\d+)'/, '$1 foot');
+
+            trimmed = trimmed.replace(/^feet of\s+/, '');
+
+            // Split on spaces and commas, filter out empty tokens, and remove extra punctuation.
+            const tokens = trimmed
+                .split(/[\s,]+/)
+                .filter(token => token.length > 0)
+                .map(token => token.replace(/^[.,;]+|[.,;]+$/g, '').replace("”",'"').replace("ʼ","'"));
+
+            // Find the first token that is a known color.
+            const runStart = tokens.findIndex(token => knownColors.has(token.toLowerCase()));
+            if (runStart === -1) return [trimmed]; // No color found.
+
+            // Identify the contiguous run where tokens are either known colors or allowed fillers.
+            let runEnd = runStart;
+            while (
+                runEnd < tokens.length &&
+                (knownColors.has(tokens[runEnd].toLowerCase()) || fillers.has(tokens[runEnd].toLowerCase()))
+            ) {
+                runEnd++;
             }
-            if (colorTokens.length >= 2) {
-                let baseDescription = tokens.slice(0, index + 1).join(' ').trim();
-                baseDescription = baseDescription.replace(/\bin\b$/i, '').trim();
-                return colorTokens.map(color => `${baseDescription} ${color}`.trim());
-            }
-            return [input];
+
+            // Extract only the known colors from that run.
+            const colorsInRun = tokens.slice(runStart, runEnd)
+                .filter(token => knownColors.has(token.toLowerCase()));
+
+            // If fewer than 2 colors are found, return the original input.
+            if (colorsInRun.length < 2) return [trimmed];
+
+            // Everything before the run is the prefix; everything after is the suffix.
+            const prefixTokens = tokens.slice(0, runStart).join(' ').trim();
+            const suffixTokens = tokens.slice(runEnd).join(' ').trim();
+
+            // Build and return a new description for each color.
+            return colorsInRun.map(color => {
+                let parts = [];
+                if (prefixTokens) parts.push(prefixTokens);
+                parts.push(color);
+                if (suffixTokens) parts.push(suffixTokens);
+                return parts.join(' ').trim();
+            });
         }
 
         const GCF_ENDPOINT = 'https://us-central1-spring-archive-445317-n4.cloudfunctions.net/get-part-numbers';
@@ -391,6 +449,8 @@ font-size: 16px;
                     return 'https://www.borderstates.com/p/';
                 case 'graybar':
                     return 'https://www.graybar.com/p/';
+                case 'wesco':
+                    return 'https://buy.wesco.com/fsearch?clp=false&q=';
                 default:
                     return 'https://example.com/search?q=';
             }
@@ -409,7 +469,7 @@ font-size: 16px;
             // Retrieve vendor, description, and current part number.
             const vendor = event.currentTarget.dataset.vendor;
             const description = event.currentTarget.dataset.description;
-            const partNumber = event.currentTarget.dataset.partNumber;
+            const partNumber = '';
             // Fill hidden fields (or display in modal header if desired)
             feedbackVendorInput.value = vendor;
             feedbackDescriptionInput.value = description;
@@ -456,6 +516,7 @@ font-size: 16px;
         })
 
         function showToast(message) {
+            console.log("showToast called with:", message);
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.style.visibility = 'visible';

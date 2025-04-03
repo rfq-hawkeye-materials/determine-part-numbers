@@ -6,6 +6,7 @@
     "@pinecone-database/pinecone": "^5.0.2",
     "cheerio": "^1.0.0-rc.12",
     "dotenv": "^16.4.7",
+    "fast-levenshtein": "^3.0.0",
     "node-fetch": "^3.3.2"
   },
   "scripts": {
