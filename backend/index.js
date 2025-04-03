@@ -248,7 +248,7 @@ async function getRealtimeGraybarResults(query) {
 // Helper: Get realtime Wesco search results
 async function getRealtimeWescoResults(query) {
     try {
-        const url = `https://buy.wesco.com/fsearch?q=${encodeURIComponent(query)}&clp=false`;
+        const url = `https://buy.wesco.com/fsearch?q=${encodeURIComponent(query.replace(/#/,''))}&clp=false`; // hashtag seems to cause issue in the search results
         const response = await fetch(url);
         if (!response.ok) {
             console.error(`Failed to fetch realtime search results: ${response.statusText}`);
