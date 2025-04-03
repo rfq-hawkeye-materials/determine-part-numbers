@@ -161,7 +161,11 @@
 <body>
     <h1>Part Number Collector</h1>
     <p>Type the parts you need in the box below, or click "Record" to speak them aloud.</p>
-    <textarea id="partsInput" placeholder="1000 feet of 2-inch EMT..."></textarea><br />
+    <textarea id="partsInput" placeholder="1000 feet of 2-inch EMT..."></textarea>
+    <!-- New: Order warnings display and bypass button -->
+    <div id="orderWarnings" style="color: red; margin-top: 10px; display: none;"></div>
+    <button id="sendAsIsBtn" style="display: none;">Send As-Is</button>
+    <br />
     <button id="recordBtn">Record</button>
     <button id="submitBtn">Submit</button>
     <button id="stopBtn" style="display: none;">STOP</button>
@@ -201,11 +205,8 @@
     <!-- Toast Container -->
     <div id="toast">Feedback submitted successfully!</div>
 
-    </div>
-
     <script>
-
-
+        // Existing parsePartDescription function remains unchanged.
         function parsePartDescription(input) {
             const knownColors = new Set([
                 'red', 'blue', 'green', 'orange', 'yellow', 'brown',
@@ -217,11 +218,9 @@
             let trimmed = input.trim();
 
             // 2. Remove a leading quantity/dash pattern unless it is followed by "foot".
-            // Here we allow both hyphen (-) and en dash (–).
             const match = trimmed.match(/^(\d+\s*[-–]\s*)(.*)$/i);
             if (match) {
                 const [fullString, numberPart, remainder] = match;
-                // If the remainder does NOT start with "foot", remove the prefix.
                 if (/^foot\b/i.test(remainder)) {
                     trimmed = (numberPart.replace(/\s*[-–]\s*/, '') + " " + remainder).trim();
                 } else {
@@ -235,23 +234,19 @@
             // 4. Remove trailing punctuation.
             trimmed = trimmed.replace(/[.,;]+$/, '').trim();
 
-            // If the result starts with a number followed immediately by an apostrophe,
-            // replace the apostrophe with "foot".
+            // Replace apostrophe with "foot" if needed.
             trimmed = trimmed.replace(/^(\d+)'/, '$1 foot');
-
             trimmed = trimmed.replace(/^feet of\s+/, '');
 
-            // Split on spaces and commas, filter out empty tokens, and remove extra punctuation.
+            // Split on spaces and commas.
             const tokens = trimmed
                 .split(/[\s,]+/)
                 .filter(token => token.length > 0)
-                .map(token => token.replace(/^[.,;]+|[.,;]+$/g, '').replace("”",'"').replace("ʼ","'"));
+                .map(token => token.replace(/^[.,;]+|[.,;]+$/g, '').replace("”", '"').replace("ʼ", "'"));
 
-            // Find the first token that is a known color.
             const runStart = tokens.findIndex(token => knownColors.has(token.toLowerCase()));
-            if (runStart === -1) return [trimmed]; // No color found.
+            if (runStart === -1) return [trimmed];
 
-            // Identify the contiguous run where tokens are either known colors or allowed fillers.
             let runEnd = runStart;
             while (
                 runEnd < tokens.length &&
@@ -260,18 +255,14 @@
                 runEnd++;
             }
 
-            // Extract only the known colors from that run.
             const colorsInRun = tokens.slice(runStart, runEnd)
                 .filter(token => knownColors.has(token.toLowerCase()));
 
-            // If fewer than 2 colors are found, return the original input.
             if (colorsInRun.length < 2) return [trimmed];
 
-            // Everything before the run is the prefix; everything after is the suffix.
             const prefixTokens = tokens.slice(0, runStart).join(' ').trim();
             const suffixTokens = tokens.slice(runEnd).join(' ').trim();
 
-            // Build and return a new description for each color.
             return colorsInRun.map(color => {
                 let parts = [];
                 if (prefixTokens) parts.push(prefixTokens);
@@ -282,6 +273,7 @@
         }
 
         const GCF_ENDPOINT = 'https://us-central1-spring-archive-445317-n4.cloudfunctions.net/get-part-numbers';
+        let bypassValidation = false; // Flag to bypass validation for subsequent requests.
 
         const submitBtn = document.getElementById('submitBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -293,28 +285,14 @@
         const tableHead = table.querySelector('thead');
         const tableBody = table.querySelector('tbody');
         const progressContainer = document.getElementById('progressContainer');
+        const orderWarnings = document.getElementById('orderWarnings');
+        const sendAsIsBtn = document.getElementById('sendAsIsBtn');
 
         let isComplete = false;
         let hasReceivedData = false;
         let eventSource;
 
-        submitBtn.addEventListener('click', async () => {
-            stopBtn.style.display = 'inline-block';
-            progressContainer.style.display = 'block';
-            const partsText = partsInput.value.trim();
-            if (!partsText) {
-                statusMessage.textContent = 'Please enter some part descriptions first.';
-                return;
-            }
-            const lines = partsText.split(/\n+/);
-            let descriptions = [];
-            lines.forEach(line => {
-                const trimmed = line.trim();
-                if (trimmed) {
-                    descriptions.push(...parsePartDescription(trimmed));
-                }
-            });
-            partsInput.value = descriptions.join('\n');
+        async function submitOrder(descriptions) {
             tableHead.innerHTML = '';
             tableBody.innerHTML = '';
             tableContainer.style.display = 'block';
@@ -325,13 +303,17 @@
             hasReceivedData = false;
             try {
                 const url = `${GCF_ENDPOINT}?descriptions=${encodeURIComponent(JSON.stringify(descriptions))}`;
-                eventSource = new EventSource(url);
                 console.log("Connecting to:", url);
+                eventSource = new EventSource(url);
                 eventSource.onopen = () => { console.log("Connection opened."); };
                 eventSource.onerror = (error) => {
                     if (isComplete) { console.log("Ignoring error event after completion:", error); return; }
-                    if (!hasReceivedData) { console.error("EventSource connection failed before any data arrived:", error); statusMessage.textContent = "Error: Connection lost."; }
-                    else { console.warn("Late EventSource error after data was received:", error); }
+                    if (!hasReceivedData) {
+                        console.error("EventSource connection failed before any data arrived:", error);
+                        statusMessage.textContent = "Error: Connection lost.";
+                    } else {
+                        console.warn("Late EventSource error after data was received:", error);
+                    }
                     eventSource.close();
                     stopBtn.style.display = 'none';
                 };
@@ -368,6 +350,76 @@
                 statusMessage.textContent = 'Error submitting parts to the server.';
                 stopBtn.style.display = 'none';
             }
+        }
+
+        submitBtn.addEventListener('click', async () => {
+            stopBtn.style.display = 'inline-block';
+            progressContainer.style.display = 'block';
+            const partsText = partsInput.value.trim();
+            if (!partsText) {
+                statusMessage.textContent = 'Please enter some part descriptions first.';
+                return;
+            }
+            const lines = partsText.split(/\n+/);
+            let descriptions = [];
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (trimmed) {
+                    descriptions.push(...parsePartDescription(trimmed));
+                }
+            });
+            // Build the sanitized order (as a string)
+            const orderText = descriptions.join('\n');
+            partsInput.value = orderText;
+
+            // If validation is not bypassed, validate the order.
+            if (!bypassValidation) {
+                try {
+                    const response = await fetch('https://validate-order-491261825965.us-central1.run.app', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ order: orderText })
+                    });
+                    if (!response.ok) {
+                        console.error('Validation request failed:', response.statusText);
+                        orderWarnings.innerHTML = `<div>Could not validate order due to an error</div>`;
+                        orderWarnings.style.display = 'block';
+                    } else {
+                        const validationData = await response.json();
+                        if (validationData.warnings && validationData.warnings.length > 0) {
+                            // Display warnings in red below the text area.
+                            orderWarnings.innerHTML = validationData.warnings.map(warning => `<div>${warning}</div>`).join('');
+                            orderWarnings.style.display = 'block';
+                            // Reveal the "Send As-Is" button.
+                            sendAsIsBtn.style.display = 'inline-block';
+                            // Do not proceed with submission.
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error validating order:', err);
+                    orderWarnings.innerHTML = `<div>Could not validate order due to an error</div>`;
+                    orderWarnings.style.display = 'block';
+                    // Proceed with submission despite the error.
+                }
+            }
+            // If bypassValidation is true or no warnings returned, clear warnings and proceed.
+            orderWarnings.style.display = 'none';
+            sendAsIsBtn.style.display = 'none';
+
+            // Proceed with submission to get-part-numbers.
+            await submitOrder(descriptions);
+        });
+
+        // "Send As-Is" button event listener to bypass validation.
+        sendAsIsBtn.addEventListener('click', () => {
+            bypassValidation = true;
+            orderWarnings.style.display = 'none';
+            sendAsIsBtn.style.display = 'none';
+            // Re-trigger submission. The bypass flag ensures validation is skipped.
+            submitBtn.click();
         });
 
         stopBtn.addEventListener('click', () => {
@@ -385,7 +437,7 @@
             progressBar.textContent = `${percentage}%`;
         }
 
-        // Append Row including info and feedback icons.
+        // Append row including info and feedback icons.
         function appendRowToTable(update) {
             const { description, vendors } = update;
             if (tableHead.rows.length === 0 && vendors && vendors.length > 0) {
@@ -426,12 +478,10 @@
                     infoIcon.appendChild(tooltip);
                     cell.appendChild(infoIcon);
                 }
-
                 const feedbackIcon = document.createElement('span');
                 feedbackIcon.className = 'feedback-icon';
-                feedbackIcon.textContent = '✎';  // Unicode pencil or choose an icon
+                feedbackIcon.textContent = '✎';
                 feedbackIcon.title = 'Report feedback';
-                // Set data attributes for later use.
                 feedbackIcon.dataset.vendor = vendorResult.vendor;
                 feedbackIcon.dataset.description = description;
                 feedbackIcon.dataset.partNumber = vendorResult.partNumber;
@@ -456,7 +506,7 @@
             }
         }
 
-        // Feedback Modal logic
+        // Feedback Modal logic.
         const feedbackModal = document.getElementById('feedbackModal');
         const feedbackForm = document.getElementById('feedbackForm');
         const feedbackVendorInput = document.getElementById('feedbackVendor');
@@ -466,11 +516,9 @@
         const cancelFeedbackBtn = document.getElementById('cancelFeedback');
 
         function openFeedbackModal(event) {
-            // Retrieve vendor, description, and current part number.
             const vendor = event.currentTarget.dataset.vendor;
             const description = event.currentTarget.dataset.description;
             const partNumber = '';
-            // Fill hidden fields (or display in modal header if desired)
             feedbackVendorInput.value = vendor;
             feedbackDescriptionInput.value = description;
             correctPartNumberInput.value = partNumber !== "N/A" ? partNumber : "";
@@ -484,7 +532,6 @@
 
         feedbackForm.addEventListener('submit', async (event) => {
             event.preventDefault();
-            // Gather feedback values.
             const vendor = feedbackVendorInput.value;
             const description = feedbackDescriptionInput.value;
             const correctPartNumber = correctPartNumberInput.value;
@@ -512,28 +559,24 @@
             } catch (error) {
                 console.error("Error submitting feedback:", error);
                 showToast("Error submitting feedback. Please try again.");
-            };
-        })
+            }
+        });
 
         function showToast(message) {
-            console.log("showToast called with:", message);
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.style.visibility = 'visible';
             toast.style.opacity = '1';
 
-            // Fade out after 3 seconds
             setTimeout(() => {
                 toast.style.transition = "opacity 0.5s ease-out";
                 toast.style.opacity = '0';
-                // After fade-out, hide the element
                 setTimeout(() => {
                     toast.style.visibility = 'hidden';
-                    toast.style.transition = ""; // Reset transition for future toasts
+                    toast.style.transition = "";
                 }, 500);
             }, 3000);
         }
-
     </script>
 </body>
 
